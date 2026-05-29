@@ -1,4 +1,3 @@
-[README.md](https://github.com/user-attachments/files/28396823/README.md)
 # CNC Pricing Console
 
 > 面向 **3D 打印 / 激光切割 / 五金加工 / 木工定制** 行业的在线算价 + 订单留存系统。

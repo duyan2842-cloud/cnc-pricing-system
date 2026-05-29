@@ -1,0 +1,1678 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>CNC Console · 定制加工算价系统</title>
+
+<!-- Tailwind CSS CDN -->
+<script src="https://cdn.tailwindcss.com"></script>
+
+<!-- Supabase JS SDK CDN -->
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+
+<!-- ============================================================
+  环境变量 (window.env)
+  - 本地:复制 config.example.js → config.js,填入实际 Supabase 凭证
+  - Vercel:Build 阶段由 scripts/build-config.js 自动生成 config.js
+  config.js 已在 .gitignore 中,不会被提交。
+============================================================ -->
+<script src="config.js"></script>
+
+<style>
+  :root {
+    --bg-0: #0a0a0a;
+    --bg-1: #111114;
+    --bg-2: #16161b;
+    --line: #26262d;
+    --line-2: #34343d;
+    --accent: #f59e0b;        /* 琥珀色 - 机床指示灯 */
+    --accent-2: #fb923c;
+    --cyan: #22d3ee;
+    --text-0: #e5e7eb;
+    --text-1: #9ca3af;
+    --text-2: #6b7280;
+    --danger: #ef4444;
+    --ok: #10b981;
+  }
+
+  html, body {
+    font-family: "JetBrains Mono", "SF Mono", "Cascadia Code", Consolas,
+                 "PingFang SC", "Microsoft YaHei", monospace;
+    background:
+      radial-gradient(1200px 600px at 20% -10%, rgba(245,158,11,0.06), transparent 60%),
+      radial-gradient(900px 500px at 110% 5%, rgba(34,211,238,0.05), transparent 60%),
+      var(--bg-0);
+    color: var(--text-0);
+    min-height: 100vh;
+  }
+
+  /* ---------- 控制台网格背景 ---------- */
+  body::before {
+    content: "";
+    position: fixed; inset: 0;
+    background-image:
+      linear-gradient(rgba(255,255,255,.022) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(255,255,255,.022) 1px, transparent 1px);
+    background-size: 32px 32px;
+    pointer-events: none;
+    z-index: 0;
+  }
+
+  .panel {
+    background: linear-gradient(180deg, var(--bg-1), var(--bg-2));
+    border: 1px solid var(--line);
+    border-radius: 14px;
+    position: relative;
+  }
+  .panel::before {
+    content: "";
+    position: absolute; inset: 0;
+    border-radius: 14px;
+    box-shadow: inset 0 1px 0 rgba(255,255,255,0.04);
+    pointer-events: none;
+  }
+
+  /* ---------- 标签徽章 ---------- */
+  .chip {
+    display: inline-flex; align-items: center; gap: 6px;
+    padding: 3px 9px;
+    font-size: 11px;
+    letter-spacing: .12em;
+    text-transform: uppercase;
+    color: var(--text-1);
+    border: 1px solid var(--line-2);
+    border-radius: 4px;
+    background: rgba(255,255,255,0.02);
+  }
+  .chip .dot {
+    width: 6px; height: 6px; border-radius: 50%;
+    background: var(--accent);
+    box-shadow: 0 0 8px var(--accent);
+  }
+  .chip.cyan .dot { background: var(--cyan); box-shadow: 0 0 8px var(--cyan); }
+
+  /* ---------- 输入控件:工业风 ---------- */
+  .ctl-label {
+    display: flex; justify-content: space-between; align-items: baseline;
+    font-size: 11px;
+    letter-spacing: .14em;
+    text-transform: uppercase;
+    color: var(--text-1);
+    margin-bottom: 6px;
+  }
+  .ctl-label .unit { color: var(--text-2); font-size: 10px; }
+
+  .ctl-input,
+  .ctl-select {
+    width: 100%;
+    background: #050507;
+    border: 1px solid var(--line-2);
+    border-radius: 8px;
+    padding: 14px 16px;
+    color: var(--text-0);
+    font-family: inherit;
+    font-size: 18px;
+    font-weight: 600;
+    letter-spacing: .02em;
+    /* 缓慢的颜色过渡 */
+    transition:
+      background-color .55s cubic-bezier(.4,0,.2,1),
+      border-color .55s cubic-bezier(.4,0,.2,1),
+      box-shadow .55s cubic-bezier(.4,0,.2,1),
+      color .55s cubic-bezier(.4,0,.2,1);
+    outline: none;
+  }
+  .ctl-input:focus,
+  .ctl-select:focus {
+    background: #0c0c12;
+    border-color: var(--accent);
+    box-shadow:
+      0 0 0 3px rgba(245,158,11,0.12),
+      inset 0 0 24px rgba(245,158,11,0.06);
+  }
+  /* 失焦回落 - 慢过渡 */
+  .ctl-input:not(:focus),
+  .ctl-select:not(:focus) {
+    transition:
+      background-color .9s cubic-bezier(.22,1,.36,1),
+      border-color .9s cubic-bezier(.22,1,.36,1),
+      box-shadow .9s cubic-bezier(.22,1,.36,1);
+  }
+
+  .ctl-select {
+    appearance: none;
+    background-image:
+      linear-gradient(45deg, transparent 50%, var(--text-1) 50%),
+      linear-gradient(135deg, var(--text-1) 50%, transparent 50%);
+    background-position:
+      calc(100% - 18px) 22px,
+      calc(100% - 13px) 22px;
+    background-size: 5px 5px;
+    background-repeat: no-repeat;
+    padding-right: 36px;
+  }
+
+  /* ---------- 启动按键 - 机床质感 ---------- */
+  .launch-btn {
+    --depth: 5px;
+    position: relative;
+    width: 100%;
+    padding: 18px 24px;
+    border: 1px solid var(--line-2);
+    border-radius: 10px;
+    background:
+      linear-gradient(180deg, #2a1c08 0%, #1a1206 60%, #0d0904 100%);
+    color: var(--accent);
+    font-family: inherit;
+    font-size: 16px;
+    font-weight: 700;
+    letter-spacing: .26em;
+    text-transform: uppercase;
+    cursor: pointer;
+    box-shadow:
+      0 var(--depth) 0 0 #050505,
+      0 calc(var(--depth) + 2px) 12px rgba(0,0,0,.6),
+      inset 0 1px 0 rgba(245,158,11,.18),
+      inset 0 -1px 0 rgba(0,0,0,.6);
+    text-shadow: 0 0 12px rgba(245,158,11,.5);
+    transform: translateY(0);
+    transition:
+      transform .08s ease-out,
+      box-shadow .08s ease-out,
+      background-color .3s ease;
+  }
+  .launch-btn::before {
+    content: "";
+    position: absolute; left: 14px; top: 50%; transform: translateY(-50%);
+    width: 8px; height: 8px;
+    border-radius: 50%;
+    background: var(--accent);
+    box-shadow: 0 0 12px var(--accent), 0 0 4px #fff inset;
+    animation: blink 1.4s ease-in-out infinite;
+  }
+  @keyframes blink {
+    0%,100% { opacity: 1; box-shadow: 0 0 12px var(--accent), 0 0 4px #fff inset; }
+    50%     { opacity: .35; box-shadow: 0 0 4px var(--accent); }
+  }
+  .launch-btn:hover:not(:disabled) {
+    background: linear-gradient(180deg, #3a2710 0%, #221606 60%, #100a04 100%);
+  }
+  .launch-btn:active:not(:disabled) {
+    transform: translateY(var(--depth));
+    box-shadow:
+      0 0 0 0 #050505,
+      0 2px 6px rgba(0,0,0,.5),
+      inset 0 1px 4px rgba(0,0,0,.7);
+  }
+  .launch-btn:disabled {
+    opacity: .55;
+    cursor: not-allowed;
+  }
+
+  /* ---------- 数字读数卡 - LCD/Nixie style ---------- */
+  .readout-card {
+    background:
+      radial-gradient(circle at 50% 30%, rgba(245,158,11,.08), transparent 65%),
+      linear-gradient(180deg, #050505, #0d0d10 60%, #050505);
+    border: 1px solid var(--line-2);
+    border-radius: 14px;
+    padding: 28px 24px;
+    position: relative;
+    overflow: hidden;
+  }
+  .readout-card::after {
+    content: "";
+    position: absolute; inset: 0;
+    background: repeating-linear-gradient(
+      0deg,
+      rgba(255,255,255,.02) 0,
+      rgba(255,255,255,.02) 1px,
+      transparent 1px,
+      transparent 3px
+    );
+    pointer-events: none;
+  }
+
+  /* ---------- 数字翻页(滚轮)组件 ---------- */
+  .odo {
+    font-family: "JetBrains Mono", Consolas, monospace;
+    font-variant-numeric: tabular-nums;
+    color: var(--accent);
+    text-shadow:
+      0 0 18px rgba(245,158,11,.55),
+      0 0 6px rgba(245,158,11,.35);
+    display: inline-flex;
+    align-items: center;
+    line-height: 1;
+  }
+  .odo-slot {
+    display: inline-block;
+    height: 1em;
+    line-height: 1em;
+    overflow: hidden;
+    vertical-align: top;
+    position: relative;
+  }
+  .odo-digit {
+    width: .62em;
+    text-align: center;
+  }
+  .odo-static {
+    padding: 0 .02em;
+  }
+  .odo-strip {
+    display: block;
+    transition: transform .65s cubic-bezier(.34,1.15,.6,1);
+  }
+  .odo-strip > span {
+    display: block;
+    height: 1em;
+    line-height: 1em;
+    text-align: center;
+  }
+
+  /* ---------- 错误状态 / 抖动 ---------- */
+  @keyframes shake {
+    0%,100% { transform: translateX(0); }
+    25% { transform: translateX(-5px); }
+    75% { transform: translateX(5px); }
+  }
+  .shake { animation: shake .32s ease-in-out; }
+  .input-error {
+    border-color: var(--danger) !important;
+    box-shadow: 0 0 0 3px rgba(239,68,68,.15) !important;
+  }
+
+  /* ---------- 成功反馈 ---------- */
+  @keyframes pop-in {
+    0%   { opacity: 0; transform: scale(.9) translateY(6px); }
+    60%  { opacity: 1; transform: scale(1.03); }
+    100% { transform: scale(1); }
+  }
+  .pop-in { animation: pop-in .45s cubic-bezier(.2,.8,.2,1) both; }
+  @keyframes draw-check { to { stroke-dashoffset: 0; } }
+  .check-path {
+    stroke-dasharray: 48;
+    stroke-dashoffset: 48;
+    animation: draw-check .55s ease-out forwards;
+    animation-delay: .15s;
+  }
+
+  /* ---------- 自定义材料区显隐 ---------- */
+  .custom-mat {
+    max-height: 0;
+    opacity: 0;
+    overflow: hidden;
+    transition: max-height .55s cubic-bezier(.22,1,.36,1), opacity .35s ease, margin-top .55s ease;
+    margin-top: 0;
+  }
+  .custom-mat.open {
+    max-height: 260px;
+    opacity: 1;
+    margin-top: 14px;
+  }
+
+  /* ---------- optgroup 暗色优化 ---------- */
+  select option { background: #050507; color: var(--text-0); }
+  select optgroup {
+    background: #0c0c12;
+    color: var(--accent);
+    font-style: normal;
+    font-weight: 700;
+    letter-spacing: .08em;
+  }
+
+  /* ---------- 图纸上传占位 ---------- */
+  .file-drop {
+    display: block;
+    position: relative;
+    border: 1.5px dashed var(--line-2);
+    border-radius: 10px;
+    background:
+      repeating-linear-gradient(
+        45deg,
+        rgba(255,255,255,0.012) 0 8px,
+        transparent 8px 16px
+      ),
+      rgba(5,5,7,.6);
+    padding: 18px 20px;
+    cursor: pointer;
+    transition: border-color .35s ease, background-color .35s ease, box-shadow .35s ease;
+  }
+  .file-drop:hover,
+  .file-drop.is-drag {
+    border-color: var(--accent);
+    background-color: rgba(245,158,11,0.04);
+    box-shadow: inset 0 0 24px rgba(245,158,11,0.04);
+  }
+  .file-drop-inner {
+    display: flex; align-items: center; gap: 14px;
+  }
+  .file-icon {
+    width: 42px; height: 42px;
+    border-radius: 8px;
+    background: linear-gradient(135deg, #1a1206, #0d0904);
+    border: 1px solid var(--line-2);
+    display: flex; align-items: center; justify-content: center;
+    color: var(--accent);
+    font-size: 20px;
+    box-shadow: inset 0 0 12px rgba(245,158,11,.18);
+  }
+  .file-title {
+    font-size: 14px; font-weight: 700;
+    color: var(--text-0);
+    letter-spacing: .02em;
+  }
+  .file-cta {
+    color: var(--accent);
+    margin-left: 4px;
+    border-bottom: 1px dashed var(--accent);
+  }
+  .file-hint {
+    font-size: 11px;
+    color: var(--text-2);
+    margin-top: 4px;
+    letter-spacing: .08em;
+  }
+  .file-selected {
+    display: flex; align-items: center; justify-content: space-between;
+    gap: 12px;
+    padding: 8px 12px;
+    margin-top: 12px;
+    background: rgba(16,185,129,.06);
+    border: 1px solid rgba(16,185,129,.3);
+    border-radius: 6px;
+    color: #6ee7b7;
+    font-size: 12px;
+  }
+  .file-selected.hidden { display: none; }
+  .file-clear {
+    background: transparent;
+    border: 1px solid rgba(110,231,183,.4);
+    color: #6ee7b7;
+    cursor: pointer;
+    font-size: 11px;
+    padding: 2px 8px;
+    border-radius: 4px;
+    transition: background .2s ease;
+  }
+  .file-clear:hover { background: rgba(16,185,129,.12); }
+
+  /* ---------- 状态徽章 ---------- */
+  .status-pill {
+    display: inline-flex; align-items: center; gap: 6px;
+    padding: 3px 9px;
+    font-size: 11px;
+    letter-spacing: .14em;
+    text-transform: uppercase;
+    color: var(--accent);
+    border: 1px solid rgba(245,158,11,.4);
+    border-radius: 999px;
+    background: rgba(245,158,11,.06);
+  }
+  .status-pill .dot {
+    width: 6px; height: 6px; border-radius: 50%;
+    background: var(--accent);
+    box-shadow: 0 0 8px var(--accent);
+    animation: blink 1.4s ease-in-out infinite;
+  }
+
+  /* ============================================================
+   *  TOAST 通知系统 - 赛博朋克
+   * ============================================================ */
+  .toast-stack {
+    position: fixed; top: 22px; right: 22px;
+    z-index: 9999;
+    display: flex; flex-direction: column; gap: 10px;
+    pointer-events: none;
+    max-width: calc(100vw - 44px);
+  }
+  @media (max-width: 640px) {
+    .toast-stack { left: 12px; right: 12px; top: 12px; }
+  }
+  .toast {
+    pointer-events: auto;
+    min-width: 280px;
+    max-width: 380px;
+    padding: 13px 14px 13px 18px;
+    border: 1px solid var(--toast-color, var(--cyan));
+    background: linear-gradient(180deg, rgba(20,15,8,0.92), rgba(8,8,10,0.92));
+    border-radius: 4px;
+    display: flex; gap: 12px;
+    align-items: flex-start;
+    position: relative;
+    overflow: hidden;
+    backdrop-filter: blur(10px) saturate(1.2);
+    -webkit-backdrop-filter: blur(10px) saturate(1.2);
+    box-shadow:
+      0 8px 28px rgba(0,0,0,.55),
+      0 0 18px var(--toast-color, var(--cyan)) inset;
+    font-family: inherit;
+    animation: toast-in .42s cubic-bezier(.2,.85,.25,1.05) both;
+  }
+  .toast.out { animation: toast-out .32s cubic-bezier(.4,0,.2,1) forwards; }
+  @keyframes toast-in {
+    0%   { transform: translateX(140%) skewX(-6deg); opacity: 0; filter: blur(6px); }
+    60%  { transform: translateX(-4%) skewX(0); opacity: 1; filter: blur(0); }
+    100% { transform: translateX(0); }
+  }
+  @keyframes toast-out {
+    to { transform: translateX(60px) scale(.94); opacity: 0; filter: blur(3px); }
+  }
+  .toast::before {
+    content: "";
+    position: absolute; left: 0; top: 0; bottom: 0; width: 3px;
+    background: var(--toast-color);
+    box-shadow: 0 0 14px var(--toast-color);
+  }
+  .toast::after {
+    content: "";
+    position: absolute; left: 0; right: 0; bottom: 0; height: 2px;
+    background: linear-gradient(90deg, var(--toast-color), transparent);
+    transform-origin: left;
+    animation: toast-progress var(--toast-duration, 4000ms) linear forwards;
+    opacity: .65;
+  }
+  @keyframes toast-progress {
+    from { transform: scaleX(1); }
+    to   { transform: scaleX(0); }
+  }
+  .toast-icon {
+    width: 26px; height: 26px; flex-shrink: 0;
+    border-radius: 4px;
+    background: rgba(0,0,0,.45);
+    border: 1px solid var(--toast-color);
+    display: flex; align-items: center; justify-content: center;
+    color: var(--toast-color);
+    font-size: 13px;
+    font-weight: 700;
+    box-shadow:
+      0 0 10px var(--toast-color) inset,
+      0 0 6px var(--toast-color);
+  }
+  .toast-body { flex: 1; min-width: 0; }
+  .toast-title {
+    color: var(--text-0);
+    font-size: 11px;
+    letter-spacing: .18em;
+    text-transform: uppercase;
+    font-weight: 700;
+  }
+  .toast-title em {
+    color: var(--toast-color);
+    font-style: normal;
+    margin-left: 6px;
+    text-shadow: 0 0 8px var(--toast-color);
+  }
+  .toast-message {
+    font-size: 12.5px;
+    color: var(--text-1);
+    margin-top: 4px;
+    line-height: 1.45;
+    word-break: break-word;
+  }
+  .toast-close {
+    background: transparent;
+    border: none;
+    color: var(--text-2);
+    cursor: pointer;
+    padding: 2px 4px;
+    font-size: 12px;
+    line-height: 1;
+    transition: color .2s;
+  }
+  .toast-close:hover { color: var(--text-0); }
+
+  .toast.success { --toast-color: #10b981; }
+  .toast.error   { --toast-color: #ef4444; }
+  .toast.warning { --toast-color: #f59e0b; }
+  .toast.info    { --toast-color: #22d3ee; }
+
+  /* ============================================================
+   *  LOGIN OVERLAY - 路由守卫
+   * ============================================================ */
+  .login-overlay {
+    position: fixed; inset: 0; z-index: 80;
+    display: flex; align-items: center; justify-content: center;
+    padding: 24px;
+    background:
+      radial-gradient(900px 500px at 50% 30%, rgba(245,158,11,0.08), transparent 60%),
+      radial-gradient(800px 400px at 50% 100%, rgba(34,211,238,0.05), transparent 60%),
+      rgba(5,5,7,.92);
+    backdrop-filter: blur(14px) saturate(1.3);
+    -webkit-backdrop-filter: blur(14px) saturate(1.3);
+    animation: fade-in .4s ease both;
+  }
+  @keyframes fade-in { from { opacity: 0; } to { opacity: 1; } }
+
+  .login-card {
+    width: 100%; max-width: 440px;
+    padding: 36px 32px 30px;
+    background: linear-gradient(180deg, rgba(22,22,27,.88), rgba(13,13,16,.78));
+    border: 1px solid var(--line);
+    border-radius: 14px;
+    position: relative;
+    box-shadow: 0 24px 80px rgba(0,0,0,.6);
+  }
+  .login-card::before {
+    content: ""; position: absolute; inset: 0;
+    border-radius: 14px;
+    box-shadow: inset 0 1px 0 rgba(255,255,255,0.05);
+    pointer-events: none;
+  }
+  .login-card .scanline {
+    position: absolute; left: 0; right: 0; height: 14px;
+    background: linear-gradient(180deg, transparent, rgba(245,158,11,.07), transparent);
+    animation: scan 4.5s linear infinite;
+    pointer-events: none;
+  }
+  .login-title {
+    margin-top: 14px;
+    font-size: 26px; font-weight: 700;
+    letter-spacing: -.01em;
+    background: linear-gradient(180deg,#ffffff,#fbbf24);
+    -webkit-background-clip: text; background-clip: text;
+    color: transparent;
+  }
+  .login-hint {
+    font-size: 12px; color: var(--text-2);
+    margin-top: 6px;
+    letter-spacing: .04em;
+  }
+  .login-form { margin-top: 24px; display: flex; flex-direction: column; gap: 14px; }
+  .login-toggle {
+    margin-top: 8px;
+    display: flex; justify-content: center; gap: 8px;
+    font-size: 11px; color: var(--text-2);
+    letter-spacing: .12em; text-transform: uppercase;
+  }
+  .login-toggle .link {
+    color: var(--accent);
+    background: transparent;
+    border: none;
+    cursor: pointer;
+    padding: 0;
+    border-bottom: 1px dashed var(--accent);
+    font-family: inherit;
+    letter-spacing: inherit;
+    text-transform: inherit;
+  }
+  @keyframes scan {
+    0%   { transform: translateY(-30px); }
+    100% { transform: translateY(700px); }
+  }
+
+  /* ---------- 路由守卫:body 状态切换 ---------- */
+  body.is-guest .console-shell { display: none !important; }
+  body.is-authed .login-overlay { display: none !important; }
+  /* 初始默认隐藏两者,等会话状态判定完毕再显示 */
+  body.is-loading .console-shell,
+  body.is-loading .login-overlay { display: none !important; }
+
+  /* ---------- Auth Loader ---------- */
+  .auth-loading {
+    position: fixed; inset: 0; z-index: 70;
+    display: flex; align-items: center; justify-content: center;
+    background: var(--bg-0);
+    flex-direction: column; gap: 18px;
+  }
+  body:not(.is-loading) .auth-loading { display: none; }
+  .auth-loading .spinner {
+    width: 36px; height: 36px;
+    border: 2px solid rgba(245,158,11,.15);
+    border-top-color: var(--accent);
+    border-radius: 50%;
+    animation: spin 1s linear infinite;
+  }
+  .auth-loading .label {
+    font-size: 11px; letter-spacing: .25em;
+    text-transform: uppercase; color: var(--text-2);
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  /* ---------- 用户徽章 + 登出 ---------- */
+  .user-badge {
+    display: inline-flex; align-items: center; gap: 8px;
+    padding: 4px 10px;
+    border: 1px solid var(--line-2);
+    border-radius: 999px;
+    background: rgba(255,255,255,.02);
+    font-size: 11px;
+    letter-spacing: .04em;
+    color: var(--text-1);
+    max-width: 200px;
+  }
+  .user-badge .ue {
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
+  .logout-btn {
+    background: transparent;
+    border: 1px solid var(--line-2);
+    border-radius: 6px;
+    padding: 4px 10px;
+    color: var(--text-1);
+    font-family: inherit;
+    font-size: 11px;
+    letter-spacing: .12em;
+    text-transform: uppercase;
+    cursor: pointer;
+    transition: color .25s, border-color .25s, background-color .25s;
+  }
+  /* ============ TOP NAV BAR (FACTORY HUB 平级入口) ============ */
+  .top-nav {
+    display: flex; align-items: center; justify-content: space-between;
+    gap: 16px; flex-wrap: wrap;
+    margin-top: 14px; padding: 10px 14px;
+    background: linear-gradient(180deg, rgba(255,255,255,.018), rgba(255,255,255,.005));
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    backdrop-filter: blur(8px);
+  }
+  .nav-cats { display: flex; gap: 4px; flex-wrap: wrap; }
+  .nav-cat {
+    padding: 7px 14px;
+    font-family: inherit; font-size: 11px; font-weight: 700;
+    letter-spacing: .18em; text-transform: uppercase;
+    color: var(--text-2);
+    background: transparent; border: 1px solid transparent;
+    border-radius: 6px;
+    cursor: default;
+    transition: color .25s, border-color .25s, background-color .25s;
+    user-select: none;
+  }
+  .nav-cat:hover { color: var(--text-1); background: rgba(255,255,255,.025); }
+  .nav-cat.disabled-hint::after {
+    content: "•";  margin-left: 6px;  color: var(--text-2);  opacity: .5;
+  }
+  .nav-hub {
+    display: inline-flex; align-items: center; gap: 8px;
+    padding: 9px 18px;
+    font-family: inherit; font-size: 12px; font-weight: 800;
+    letter-spacing: .22em; text-transform: uppercase;
+    color: var(--accent); text-decoration: none;
+    background: linear-gradient(180deg, rgba(245,158,11,.12), rgba(245,158,11,.04));
+    border: 1px solid rgba(245,158,11,.55);
+    border-radius: 6px;
+    box-shadow:
+      0 0 18px rgba(245,158,11,.18),
+      inset 0 0 14px rgba(245,158,11,.08);
+    text-shadow: 0 0 12px rgba(245,158,11,.55);
+    transition: transform .15s, box-shadow .25s, color .25s;
+    position: relative;
+  }
+  .nav-hub::before {
+    content: ""; width: 8px; height: 8px; border-radius: 50%;
+    background: var(--accent);
+    box-shadow: 0 0 10px var(--accent);
+    animation: blink 1.4s ease-in-out infinite;
+  }
+  .nav-hub:hover {
+    color: #fff7e0;
+    box-shadow: 0 0 28px rgba(245,158,11,.35), inset 0 0 18px rgba(245,158,11,.14);
+    transform: translateY(-1px);
+  }
+  @keyframes blink { 0%,100%{opacity:1} 50%{opacity:.35} }
+
+  .logout-btn:hover {
+    color: var(--accent);
+    border-color: var(--accent);
+    background: rgba(245,158,11,.06);
+  }
+
+  /* ---------- 扫描线动画 ---------- */
+  @keyframes scan {
+    0%   { transform: translateY(-100%); }
+    100% { transform: translateY(900%); }
+  }
+  .scanline {
+    position: absolute; left: 0; right: 0; height: 14px;
+    background: linear-gradient(180deg, transparent, rgba(245,158,11,.07), transparent);
+    pointer-events: none;
+    animation: scan 4.5s linear infinite;
+  }
+
+  /* ---------- 标量小数字(公式行) ---------- */
+  .formula {
+    font-family: "JetBrains Mono", Consolas, monospace;
+    font-size: 11px;
+    letter-spacing: .08em;
+    color: var(--text-2);
+  }
+  .formula em { color: var(--accent); font-style: normal; }
+
+  /* hide spinner */
+  input[type=number]::-webkit-outer-spin-button,
+  input[type=number]::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
+  input[type=number] { -moz-appearance: textfield; }
+</style>
+</head>
+
+<body class="antialiased is-loading">
+
+<!-- ============ Toast 容器 ============ -->
+<div id="toast-stack" class="toast-stack" aria-live="polite" aria-atomic="false"></div>
+
+<!-- ============ Auth Loader (初始判定会话时) ============ -->
+<div class="auth-loading" aria-hidden="true">
+  <div class="spinner"></div>
+  <div class="label">SESSION · CHECKING</div>
+</div>
+
+<!-- ============ Login Overlay (路由守卫) ============ -->
+<div id="login-overlay" class="login-overlay" aria-hidden="false">
+  <div class="login-card">
+    <div class="scanline"></div>
+    <div class="chip cyan"><span class="dot"></span><span>AUTH REQUIRED · 身份验证</span></div>
+    <h1 class="login-title">登录控制台</h1>
+    <p class="login-hint">仅授权账号可进入报价系统 · 会话刷新页面不丢失</p>
+
+    <div class="login-form">
+      <div>
+        <div class="ctl-label"><span>Email / 邮箱</span><span class="unit">USER</span></div>
+        <input id="loginEmail" type="email" class="ctl-input" autocomplete="username"
+               placeholder="you@example.com" />
+      </div>
+      <div>
+        <div class="ctl-label"><span>Password / 密码</span><span class="unit">SECRET</span></div>
+        <input id="loginPassword" type="password" class="ctl-input" autocomplete="current-password"
+               placeholder="••••••••" />
+      </div>
+
+      <button id="loginBtn" class="launch-btn mt-2" type="button">
+        <span class="ml-6" id="loginBtnText">▶ 登录 / SIGN IN</span>
+      </button>
+
+      <div class="login-toggle">
+        <span id="modeHint">还没有账号?</span>
+        <button type="button" id="toggleMode" class="link">切换至注册</button>
+      </div>
+
+      <div id="resendBox" class="login-toggle" style="display:none; flex-direction:column; align-items:center; gap:6px; margin-top:14px; padding-top:12px; border-top:1px dashed var(--line-2)">
+        <span style="color:var(--accent); text-transform:none; letter-spacing:.02em; font-size:11px">
+          ⚠ 邮箱未验证 - 请到邮箱点击验证链接后再登录
+        </span>
+        <button type="button" id="resendBtn" class="link">↻ 重新发送验证邮件</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ============ 受守卫的主控制台 ============ -->
+<div class="console-shell relative z-10 min-h-screen px-4 py-8 sm:py-10 max-w-7xl mx-auto">
+
+  <!-- ============ HEADER ============ -->
+  <header class="mb-6">
+    <div class="flex items-center justify-between gap-3 flex-wrap">
+      <div class="flex items-center gap-3">
+        <div class="w-11 h-11 rounded-lg flex items-center justify-center border border-amber-500/40"
+             style="background: linear-gradient(135deg,#1a1206,#0d0904); box-shadow: 0 0 18px rgba(245,158,11,.25) inset;">
+          <span style="color:var(--accent); font-size:20px;">⚙</span>
+        </div>
+        <div>
+          <div class="text-base font-bold tracking-widest" style="color:var(--text-0)">CNC&nbsp;CONSOLE</div>
+          <div class="text-[10px] tracking-[.22em] uppercase" style="color:var(--text-2)">Auto Quoting · Production Orchestration</div>
+        </div>
+      </div>
+
+      <div class="flex items-center gap-2 flex-wrap justify-end">
+        <div id="userBadge" class="user-badge" style="display:none">
+          <span style="color:var(--ok)">●</span>
+          <span class="ue" id="userEmail"></span>
+        </div>
+        <button id="logoutBtn" class="logout-btn" style="display:none" type="button">登出 · LOGOUT</button>
+      </div>
+    </div>
+
+    <!-- 平级主导航 -->
+    <nav class="top-nav">
+      <div class="nav-cats">
+        <span class="nav-cat">3D PRINT</span>
+        <span class="nav-cat">LASER</span>
+        <span class="nav-cat">METAL</span>
+        <span class="nav-cat">WOOD</span>
+      </div>
+      <a href="factory.html" id="factoryEntry" class="nav-hub" style="display:none">
+        FACTORY HUB · 生产调度中心
+      </a>
+    </nav>
+  </header>
+
+  <!-- ============ DASHBOARD GRID ============ -->
+  <div class="grid grid-cols-1 lg:grid-cols-5 gap-5">
+
+    <!-- ====== 左侧:输入区 (3/5) ====== -->
+    <section class="panel p-6 lg:col-span-3">
+      <div class="flex items-center justify-between mb-5">
+        <div>
+          <div class="chip mb-2"><span class="dot"></span><span>Input Panel · 01</span></div>
+          <h2 class="text-xl font-bold tracking-tight">工件参数</h2>
+          <p class="text-xs mt-1" style="color:var(--text-2)">填写规格,系统实时演算报价</p>
+        </div>
+      </div>
+
+      <div class="grid grid-cols-2 gap-4">
+        <div>
+          <div class="ctl-label"><span>Length / 长度</span><span class="unit">MM</span></div>
+          <input id="length" type="number" min="0" step="1" value="100" class="ctl-input" />
+        </div>
+        <div>
+          <div class="ctl-label"><span>Width / 宽度</span><span class="unit">MM</span></div>
+          <input id="width" type="number" min="0" step="1" value="50" class="ctl-input" />
+        </div>
+        <div>
+          <div class="ctl-label"><span>Height / 高度</span><span class="unit">MM</span></div>
+          <input id="height" type="number" min="0" step="1" value="20" class="ctl-input" />
+        </div>
+        <div>
+          <div class="ctl-label"><span>Quantity / 件数</span><span class="unit">PCS</span></div>
+          <input id="quantity" type="number" min="1" step="1" value="1" class="ctl-input" />
+        </div>
+
+        <div class="col-span-2">
+          <div class="ctl-label"><span>Material / 材质</span><span class="unit">Preset / Custom</span></div>
+          <select id="material" class="ctl-select"><!-- 由 JS 填充 --></select>
+
+          <!-- 自定义材料输入区(模式 B) -->
+          <div id="customMat" class="custom-mat">
+            <div class="grid grid-cols-2 gap-4">
+              <div>
+                <div class="ctl-label"><span>Custom Name / 自定义名称</span><span class="unit">TEXT</span></div>
+                <input id="customName" type="text" placeholder="如:陶瓷 / Magnesium..." class="ctl-input" />
+              </div>
+              <div>
+                <div class="ctl-label"><span>Custom Factor / 自定义系数</span><span class="unit">×</span></div>
+                <input id="customFactor" type="number" min="1" step="1" placeholder="60" class="ctl-input" />
+              </div>
+            </div>
+            <p class="formula mt-2">⚠ 自定义系数将直接代入运算公式,请按经验值填写</p>
+          </div>
+        </div>
+      </div>
+
+      <hr class="my-6" style="border-color:var(--line)" />
+
+      <!-- ====== 图纸上传(占位) ====== -->
+      <div class="mb-5">
+        <div class="ctl-label">
+          <span>Blueprint / 上传图纸文件</span>
+          <span class="unit">STEP · DXF · STL · 选填</span>
+        </div>
+        <label for="blueprint" class="file-drop" id="fileDropArea">
+          <input type="file" id="blueprint" accept=".step,.stp,.dxf,.stl,.STEP,.STP,.DXF,.STL"
+                 class="hidden" />
+          <div class="file-drop-inner">
+            <div class="file-icon">📐</div>
+            <div>
+              <div class="file-title">
+                拖拽图纸至此<span class="file-cta">或点击选择文件</span>
+              </div>
+              <div class="file-hint">
+                支持 STEP / STP / DXF / STL · 单文件 ≤ 30 MB · 选填,后续接入 Storage
+              </div>
+            </div>
+          </div>
+          <div id="fileSelected" class="file-selected hidden">
+            <span>📎 <span id="fileName"></span></span>
+            <button type="button" id="fileClear" class="file-clear">✕ 移除</button>
+          </div>
+        </label>
+      </div>
+
+      <hr class="my-6" style="border-color:var(--line)" />
+
+      <div class="flex items-center justify-between mb-4">
+        <div>
+          <div class="chip mb-2"><span class="dot"></span><span>Operator · 02</span></div>
+          <h2 class="text-xl font-bold tracking-tight">联系信息 · 订单留存</h2>
+          <p class="text-xs mt-1" style="color:var(--text-2)">
+            提交后将进入收银台支付定金,初始状态
+            <span class="status-pill ml-1"><span class="dot"></span>1_待付款</span>
+          </p>
+        </div>
+      </div>
+
+      <div class="grid grid-cols-2 gap-4">
+        <div>
+          <div class="ctl-label"><span>Name / 姓名</span><span class="unit">REQ</span></div>
+          <input id="name" type="text" placeholder="您的姓名" class="ctl-input" />
+          <p id="name-err" class="hidden mt-2 text-xs" style="color:var(--danger)">请填写姓名</p>
+        </div>
+        <div>
+          <div class="ctl-label"><span>Phone / 电话</span><span class="unit">11-DIGIT</span></div>
+          <input id="phone" type="tel" placeholder="11 位手机号" class="ctl-input" />
+          <p id="phone-err" class="hidden mt-2 text-xs" style="color:var(--danger)">请填写联系电话</p>
+        </div>
+      </div>
+
+      <button id="submitBtn" class="launch-btn mt-7">
+        <span class="ml-6">▶ 提交订单 · 获取正式报价</span>
+      </button>
+
+    </section>
+
+    <!-- ====== 右侧:结果读数 (2/5) ====== -->
+    <aside class="lg:col-span-2 flex flex-col gap-5">
+
+      <div class="readout-card">
+        <div class="scanline"></div>
+        <div class="flex items-center justify-between mb-3 relative z-10">
+          <div class="chip"><span class="dot"></span><span>Readout · 实时</span></div>
+          <div class="text-[10px] tracking-[.22em] uppercase" style="color:var(--text-2)">CNY · ¥</div>
+        </div>
+        <div class="text-[10px] tracking-[.2em] uppercase mb-1 relative z-10" style="color:var(--text-1)">
+          Estimated Total · 预估总价
+        </div>
+        <div class="relative z-10">
+          <span class="odo text-5xl sm:text-6xl font-bold" id="priceOdo"></span>
+        </div>
+        <div id="formula" class="formula mt-4 relative z-10"></div>
+      </div>
+
+      <div class="panel p-5">
+        <div class="chip mb-3"><span class="dot"></span><span>Param Trace · 03</span></div>
+        <ul class="text-xs space-y-2.5" style="color:var(--text-1)">
+          <li class="flex justify-between"><span>L × W × H</span><span id="trace-vol" style="color:var(--text-0)">—</span></li>
+          <li class="flex justify-between"><span>Material</span><span id="trace-mat" style="color:var(--text-0)">—</span></li>
+          <li class="flex justify-between"><span>Factor</span><span id="trace-factor" style="color:var(--accent)">—</span></li>
+          <li class="flex justify-between"><span>Mode</span><span id="trace-mode" style="color:var(--cyan)">—</span></li>
+          <li class="flex justify-between"><span>Quantity</span><span id="trace-qty" style="color:var(--text-0)">—</span></li>
+          <li class="flex justify-between pt-2 mt-2" style="border-top:1px dashed var(--line-2)">
+            <span>Unit Price</span><span id="trace-unit" style="color:var(--text-0)">—</span>
+          </li>
+        </ul>
+      </div>
+
+    </aside>
+  </div>
+
+  <footer class="mt-8 text-[10px] tracking-[.22em] uppercase text-center" style="color:var(--text-2)">
+    <div class="flex items-center justify-center gap-4 flex-wrap" style="opacity:.55">
+      <span>© 2026 CNC Pricing Console</span>
+      <span>·</span>
+      <span><span style="color:var(--ok)">●</span>&nbsp;SYS&nbsp;ONLINE</span>
+      <span>·</span>
+      <span><span id="sb-dot" style="display:inline-block;width:6px;height:6px;border-radius:50%;background:var(--text-2);vertical-align:middle"></span>&nbsp;DB&nbsp;<span id="sb-status">…</span></span>
+      <span>·</span>
+      <span>Powered by Supabase</span>
+    </div>
+  </footer>
+
+</div>
+
+<script>
+  /* ============================================================
+   *  0. Toast 通知 - 全局可用 window.showToast()
+   * ============================================================ */
+  (function () {
+    const stack = document.getElementById("toast-stack");
+    const ICONS = { success: "✓", error: "✕", warning: "!", info: "i" };
+    function escapeHtml(s) {
+      return String(s).replace(/[&<>"']/g, c => (
+        { "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;" }[c]
+      ));
+    }
+    window.showToast = function ({
+      type = "info", title = "", message = "", duration = 4000
+    } = {}) {
+      const t = document.createElement("div");
+      t.className = `toast ${type}`;
+      t.style.setProperty("--toast-duration", `${duration}ms`);
+      t.innerHTML = `
+        <div class="toast-icon">${ICONS[type] || "i"}</div>
+        <div class="toast-body">
+          <div class="toast-title">${escapeHtml(title)} <em>${escapeHtml(type.toUpperCase())}</em></div>
+          ${ message ? `<div class="toast-message">${escapeHtml(message)}</div>` : "" }
+        </div>
+        <button class="toast-close" aria-label="关闭">✕</button>
+      `;
+      stack.appendChild(t);
+
+      const close = () => {
+        t.classList.add("out");
+        setTimeout(() => t.remove(), 320);
+      };
+      t.querySelector(".toast-close").addEventListener("click", close);
+      const timer = setTimeout(close, duration);
+      t.addEventListener("mouseenter", () => clearTimeout(timer));
+      return { close };
+    };
+
+    /* 网络在线 / 离线 全局监听 */
+    window.addEventListener("offline", () => window.showToast({
+      type: "warning", title: "网络断开", message: "已切换至离线状态,稍后将自动恢复"
+    }));
+    window.addEventListener("online", () => window.showToast({
+      type: "success", title: "网络已恢复", message: "通信通道重新建立"
+    }));
+  })();
+
+  /* ============================================================
+   *  1. 行业材料库:三大分组,每条 { name, baseFactor }
+   *  ── 后续如需调价,直接修改 baseFactor 字段即可 ──
+   * ============================================================ */
+  const MATERIAL_GROUPS = [
+    {
+      group: "3D 打印 / 塑料类",
+      items: [
+        { name: "ABS 塑料 (ABS)",      baseFactor: 30 },
+        { name: "PLA",                 baseFactor: 28 },
+        { name: "光敏树脂 (Resin)",     baseFactor: 45 },
+        { name: "尼龙 (Nylon)",        baseFactor: 35 },
+      ],
+    },
+    {
+      group: "金属加工 / 五金类",
+      items: [
+        { name: "铝合金 (Aluminum)",        baseFactor: 50  },
+        { name: "不锈钢 (Stainless Steel)", baseFactor: 80  },
+        { name: "钛合金 (Titanium)",         baseFactor: 120 },
+        { name: "黄铜 (Brass)",             baseFactor: 75  },
+      ],
+    },
+    {
+      group: "木材 / 板材类",
+      items: [
+        { name: "实木板 (Solid Wood)", baseFactor: 40 },
+        { name: "密度板 (MDF)",        baseFactor: 22 },
+        { name: "亚克力板 (Acrylic)",   baseFactor: 25 },
+      ],
+    },
+  ];
+  const CUSTOM_VALUE = "__custom__";
+
+  /* ============================================================
+   *  2. Supabase 初始化(从 window.env 读取凭证)
+   * ============================================================ */
+  const ENV = window.env || {};
+  const SUPABASE_URL = ENV.SUPABASE_URL || "";
+  const SUPABASE_KEY = ENV.SUPABASE_ANON_KEY || "";
+
+  // 凭证可见性诊断 - 排查"密钥被覆盖/为空"
+  console.log("[Auth] window.env =", window.env);
+  console.log("[Auth] SUPABASE_URL =", SUPABASE_URL || "(空!)");
+  console.log("[Auth] SUPABASE_KEY 长度 =", SUPABASE_KEY.length,
+              SUPABASE_KEY ? `前缀: ${SUPABASE_KEY.slice(0,16)}…` : "(空!)");
+
+  let sb = null;
+  const statusEl = document.getElementById("sb-status");
+  const sbDot    = document.getElementById("sb-dot");
+  try {
+    if (SUPABASE_URL.startsWith("http") && SUPABASE_KEY.length > 20) {
+      sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY, {
+        auth: {
+          persistSession:   true,   // 刷新页面不丢失会话
+          autoRefreshToken: true,
+          detectSessionInUrl: true,
+        },
+      });
+      console.log("[Auth] Supabase client 已创建 ✓");
+      statusEl.textContent = "ONLINE";
+      sbDot.style.background = "var(--ok)";
+      sbDot.style.boxShadow  = "0 0 8px var(--ok)";
+    } else {
+      console.error("[Auth] 凭证缺失或格式不对,Supabase 客户端未创建");
+      statusEl.textContent = "UNCONFIGURED";
+      sbDot.style.background = "var(--accent-2)";
+    }
+  } catch (e) {
+    console.error("[Auth] Supabase 初始化失败:", e);
+    statusEl.textContent = "OFFLINE";
+    sbDot.style.background = "var(--danger)";
+  }
+
+  /* ============================================================
+   *  2.1 Auth 路由守卫 - 登录态决定显示哪一块
+   * ============================================================ */
+  const loginOverlay   = document.getElementById("login-overlay");
+  const loginEmailEl   = document.getElementById("loginEmail");
+  const loginPwdEl     = document.getElementById("loginPassword");
+  const loginBtn       = document.getElementById("loginBtn");
+  const loginBtnText   = document.getElementById("loginBtnText");
+  const toggleModeBtn  = document.getElementById("toggleMode");
+  const modeHint       = document.getElementById("modeHint");
+  const userBadge      = document.getElementById("userBadge");
+  const userEmailEl    = document.getElementById("userEmail");
+  const logoutBtn      = document.getElementById("logoutBtn");
+  const resendBox      = document.getElementById("resendBox");
+  const resendBtn      = document.getElementById("resendBtn");
+
+  let authMode = "signin"; // "signin" | "signup"
+
+  // 把 Supabase 原始错误映射成中文友好提示 + 是否需要展示"重发验证邮件"
+  function mapAuthError(err) {
+    const raw = (err?.message || "").toLowerCase();
+    if (raw.includes("email not confirmed")) {
+      return { title: "邮箱未验证", message: "请到邮箱点击验证链接,或使用下方按钮重发验证邮件", showResend: true };
+    }
+    if (raw.includes("invalid login credentials")) {
+      return { title: "邮箱或密码错误", message: "请检查后重试。如果是新注册,请确认是否已验证邮箱" };
+    }
+    if (raw.includes("user already registered") || raw.includes("already been registered")) {
+      return { title: "邮箱已注册", message: "请直接登录;若忘记密码或未验证,可重发验证邮件", showResend: true };
+    }
+    if (raw.includes("rate limit") || raw.includes("too many")) {
+      return { title: "请求过于频繁", message: "请稍后再试(Supabase 限流)" };
+    }
+    if (raw.includes("password should be") || raw.includes("weak password")) {
+      return { title: "密码不符合要求", message: err.message };
+    }
+    if (raw.includes("network") || raw.includes("failed to fetch")) {
+      return { title: "网络错误", message: "无法连接 Supabase,请检查网络/CORS/URL" };
+    }
+    return { title: "认证失败", message: err?.message || "未知错误" };
+  }
+
+  function setBodyState(state) {
+    document.body.classList.remove("is-loading", "is-guest", "is-authed");
+    document.body.classList.add(state);
+  }
+
+  function applySession(session) {
+    const factoryLink = document.getElementById("factoryEntry");
+    if (session && session.user) {
+      setBodyState("is-authed");
+      userEmailEl.textContent = session.user.email || session.user.id;
+      userBadge.style.display = "inline-flex";
+      logoutBtn.style.display = "inline-block";
+      if (factoryLink) factoryLink.style.display = "inline-flex";
+    } else {
+      setBodyState("is-guest");
+      userBadge.style.display = "none";
+      logoutBtn.style.display = "none";
+      if (factoryLink) factoryLink.style.display = "none";
+    }
+  }
+
+  function setLoginMode(mode) {
+    authMode = mode;
+    if (mode === "signup") {
+      loginBtnText.textContent = "▶ 注册 / SIGN UP";
+      modeHint.textContent     = "已有账号?";
+      toggleModeBtn.textContent = "切换至登录";
+    } else {
+      loginBtnText.textContent = "▶ 登录 / SIGN IN";
+      modeHint.textContent     = "还没有账号?";
+      toggleModeBtn.textContent = "切换至注册";
+    }
+  }
+  toggleModeBtn.addEventListener("click", () => {
+    setLoginMode(authMode === "signin" ? "signup" : "signin");
+  });
+
+  async function handleAuthSubmit() {
+    const email = loginEmailEl.value.trim();
+    const pwd   = loginPwdEl.value;
+    if (!email || !pwd) {
+      window.showToast({ type: "warning", title: "信息不完整", message: "请填写邮箱和密码" });
+      return;
+    }
+    if (pwd.length < 6) {
+      window.showToast({ type: "warning", title: "密码太短", message: "Supabase 要求密码至少 6 位" });
+      return;
+    }
+    if (!sb) {
+      window.showToast({ type: "error", title: "未配置", message: "Supabase 凭证缺失,请检查 config.js / 环境变量" });
+      return;
+    }
+
+    // 每次提交先隐藏重发面板
+    resendBox.style.display = "none";
+
+    loginBtn.disabled = true;
+    const orig = loginBtnText.textContent;
+    loginBtnText.textContent = authMode === "signup" ? "▶ 注册中..." : "▶ 登录中...";
+
+    try {
+      if (authMode === "signup") {
+        const { data, error } = await sb.auth.signUp({ email, password: pwd });
+        console.log("[Auth] signUp 返回:", { data, error });
+        if (error) throw error;
+        if (data?.session) {
+          // 注册即登录(后台关闭了 Confirm Email)
+          window.showToast({ type: "success", title: "注册并已登录", message: email });
+          applySession(data.session);
+          loginPwdEl.value = "";
+        } else {
+          // Confirm Email 打开 - 必须先点验证邮件
+          window.showToast({
+            type: "info", title: "注册成功 · 请验证邮箱",
+            message: "已发送验证邮件到 " + email + ",请点击邮件中的链接后再回来登录",
+            duration: 8000,
+          });
+          setLoginMode("signin");
+          resendBox.style.display = "flex";
+        }
+      } else {
+        const { data, error } = await sb.auth.signInWithPassword({ email, password: pwd });
+        console.log("[Auth] signInWithPassword 返回:", { data, error });
+        if (error) throw error;
+        if (!data?.session) {
+          throw new Error("登录返回为空 - 未拿到 session");
+        }
+        window.showToast({ type: "success", title: "欢迎回来", message: email });
+        loginPwdEl.value = "";
+        // 显式切换视图,不只依赖 onAuthStateChange,防止"卡住"
+        applySession(data.session);
+      }
+    } catch (err) {
+      // 打印完整错误对象,便于排查 (status / name / __isAuthError / stack)
+      console.error("[Auth] 完整错误对象:", err);
+      console.error("[Auth] error.message =", err?.message);
+      console.error("[Auth] error.status  =", err?.status);
+      console.error("[Auth] error.name    =", err?.name);
+      const m = mapAuthError(err);
+      window.showToast({
+        type: "error",
+        title: (authMode === "signup" ? "注册失败 · " : "登录失败 · ") + m.title,
+        message: m.message,
+        duration: 6000,
+      });
+      if (m.showResend) {
+        resendBox.style.display = "flex";
+      }
+    } finally {
+      loginBtn.disabled = false;
+      loginBtnText.textContent = orig;
+    }
+  }
+  loginBtn.addEventListener("click", handleAuthSubmit);
+  [loginEmailEl, loginPwdEl].forEach(el =>
+    el.addEventListener("keydown", e => {
+      if (e.key === "Enter") { e.preventDefault(); handleAuthSubmit(); }
+    })
+  );
+
+  // 重发验证邮件
+  resendBtn.addEventListener("click", async () => {
+    const email = loginEmailEl.value.trim();
+    if (!email) {
+      window.showToast({ type: "warning", title: "请先填写邮箱", message: "需要邮箱才能重发验证邮件" });
+      return;
+    }
+    if (!sb) return;
+    resendBtn.disabled = true;
+    const orig = resendBtn.textContent;
+    resendBtn.textContent = "↻ 发送中...";
+    try {
+      const { data, error } = await sb.auth.resend({ type: "signup", email });
+      console.log("[Auth] resend 返回:", { data, error });
+      if (error) throw error;
+      window.showToast({
+        type: "success", title: "已重发验证邮件",
+        message: "请到 " + email + " 邮箱(含垃圾箱)查收", duration: 6000,
+      });
+    } catch (err) {
+      console.error("[Auth] 重发失败:", err);
+      const m = mapAuthError(err);
+      window.showToast({ type: "error", title: "重发失败 · " + m.title, message: m.message });
+    } finally {
+      resendBtn.disabled = false;
+      resendBtn.textContent = orig;
+    }
+  });
+
+  logoutBtn.addEventListener("click", async () => {
+    if (!sb) return;
+    await sb.auth.signOut();
+    window.showToast({ type: "info", title: "已登出", message: "会话已清除" });
+  });
+
+  /* 启动:判定当前会话 + 监听变化 */
+  (async function bootstrapAuth() {
+    if (!sb) {
+      // 没有 Supabase 凭证 - 直接进入 guest 态并提示
+      setBodyState("is-guest");
+      window.showToast({
+        type: "error",
+        title: "缺少配置",
+        message: "未检测到 Supabase 凭证。请创建 config.js 或在 Vercel 设置环境变量。",
+        duration: 8000,
+      });
+      return;
+    }
+    try {
+      const { data: { session } } = await sb.auth.getSession();
+      applySession(session);
+    } catch (e) {
+      console.error(e);
+      setBodyState("is-guest");
+      window.showToast({ type: "error", title: "会话检测失败", message: e.message || String(e) });
+    }
+    sb.auth.onAuthStateChange((_evt, session) => applySession(session));
+  })();
+
+  /* ============================================================
+   *  3. DOM 引用
+   * ============================================================ */
+  const lengthEl       = document.getElementById("length");
+  const widthEl        = document.getElementById("width");
+  const heightEl       = document.getElementById("height");
+  const quantityEl     = document.getElementById("quantity");
+  const materialEl     = document.getElementById("material");
+  const customMatBox   = document.getElementById("customMat");
+  const customNameEl   = document.getElementById("customName");
+  const customFactorEl = document.getElementById("customFactor");
+
+  const nameEl     = document.getElementById("name");
+  const phoneEl    = document.getElementById("phone");
+  const nameErr    = document.getElementById("name-err");
+  const phoneErr   = document.getElementById("phone-err");
+  const submitBtn  = document.getElementById("submitBtn");
+
+  const priceOdo  = document.getElementById("priceOdo");
+  const formulaEl = document.getElementById("formula");
+
+  const blueprintEl    = document.getElementById("blueprint");
+  const fileDropArea   = document.getElementById("fileDropArea");
+  const fileSelectedEl = document.getElementById("fileSelected");
+  const fileNameEl     = document.getElementById("fileName");
+  const fileClearEl    = document.getElementById("fileClear");
+
+  const traceVol    = document.getElementById("trace-vol");
+  const traceMat    = document.getElementById("trace-mat");
+  const traceFactor = document.getElementById("trace-factor");
+  const traceMode   = document.getElementById("trace-mode");
+  const traceQty    = document.getElementById("trace-qty");
+  const traceUnit   = document.getElementById("trace-unit");
+
+  /* ============================================================
+   *  4. 渲染材料下拉(optgroup 分组 + 自定义)
+   * ============================================================ */
+  function buildMaterialOptions() {
+    MATERIAL_GROUPS.forEach((g, gi) => {
+      const og = document.createElement("optgroup");
+      og.label = g.group;
+      g.items.forEach((m, mi) => {
+        const opt = document.createElement("option");
+        opt.value = `${gi}:${mi}`;
+        opt.textContent = `${m.name}  ×${m.baseFactor}`;
+        og.appendChild(opt);
+      });
+      materialEl.appendChild(og);
+    });
+    const customOg = document.createElement("optgroup");
+    customOg.label = "自定义";
+    const sep = document.createElement("option");
+    sep.value = CUSTOM_VALUE;
+    sep.textContent = "── 自定义材料 (Custom) ──";
+    customOg.appendChild(sep);
+    materialEl.appendChild(customOg);
+  }
+  buildMaterialOptions();
+
+  materialEl.addEventListener("change", () => {
+    const isCustom = materialEl.value === CUSTOM_VALUE;
+    customMatBox.classList.toggle("open", isCustom);
+    calculatePrice();
+  });
+  [customNameEl, customFactorEl].forEach(el =>
+    el.addEventListener("input", calculatePrice)
+  );
+
+  /* ============================================================
+   *  5. 当前材料解析
+   * ============================================================ */
+  function getCurrentMaterial() {
+    if (materialEl.value === CUSTOM_VALUE) {
+      const name   = customNameEl.value.trim() || "自定义材料";
+      const factor = parseFloat(customFactorEl.value) || 0;
+      return { name, factor, mode: "CUSTOM", group: "自定义" };
+    }
+    const [gi, mi] = materialEl.value.split(":").map(Number);
+    const grp = MATERIAL_GROUPS[gi] || MATERIAL_GROUPS[0];
+    const m   = grp.items[mi] || grp.items[0];
+    return { name: m.name, factor: m.baseFactor, mode: "PRESET", group: grp.group };
+  }
+
+  /* ============================================================
+   *  6. 数字翻页(滚轮)读数 - 类似机械里程表
+   * ============================================================ */
+  const DIGIT_TPL = (() => {
+    let s = "";
+    for (let i = 0; i < 10; i++) s += `<span>${i}</span>`;
+    return s;
+  })();
+
+  const odoSlots = []; // { el, type:'digit'|'static'|null, stripEl, currentDigit }
+  const ODO_MAX = 14;
+  (function initOdometer() {
+    for (let i = 0; i < ODO_MAX; i++) {
+      const slot = document.createElement("span");
+      slot.className = "odo-slot";
+      slot.style.display = "none";
+      priceOdo.appendChild(slot);
+      odoSlots.push({ el: slot, type: null, stripEl: null, currentDigit: 0 });
+    }
+  })();
+
+  function renderOdometer(text) {
+    // text 例:"¥ 1,234.56"
+    const chars = text.split("");
+    const pad   = ODO_MAX - chars.length;
+    for (let i = 0; i < ODO_MAX; i++) {
+      const slot = odoSlots[i];
+      const idx  = i - pad;
+      if (idx < 0) {
+        slot.el.style.display = "none";
+        slot.type = null;
+        continue;
+      }
+      slot.el.style.display = "inline-block";
+      const c = chars[idx];
+      if (/\d/.test(c)) {
+        const d = parseInt(c);
+        if (slot.type !== "digit") {
+          slot.el.classList.remove("odo-static");
+          slot.el.classList.add("odo-digit");
+          slot.el.innerHTML = `<span class="odo-strip">${DIGIT_TPL}</span>`;
+          slot.stripEl = slot.el.querySelector(".odo-strip");
+          slot.type = "digit";
+        }
+        if (slot.currentDigit !== d) {
+          slot.stripEl.style.transform = `translateY(-${d}em)`;
+          slot.currentDigit = d;
+        }
+      } else {
+        slot.el.classList.remove("odo-digit");
+        slot.el.classList.add("odo-static");
+        if (slot.type !== "static" || slot.el.textContent !== c) {
+          slot.el.textContent = c;
+        }
+        slot.stripEl = null;
+        slot.type = "static";
+      }
+    }
+  }
+
+  /* ============================================================
+   *  7. 价格格式化 + 实时计算
+   *  公式:price = (L × W × H × factor × 0.0001) × qty
+   * ============================================================ */
+  const priceFormatter = new Intl.NumberFormat("zh-CN", {
+    style: "currency", currency: "CNY",
+    minimumFractionDigits: 2, maximumFractionDigits: 2,
+  });
+
+  function calculatePrice() {
+    const L   = parseFloat(lengthEl.value)   || 0;
+    const W   = parseFloat(widthEl.value)    || 0;
+    const H   = parseFloat(heightEl.value)   || 0;
+    const Q   = parseInt(quantityEl.value)   || 0;
+    const mat = getCurrentMaterial();
+    const F   = mat.factor;
+
+    const unit  = L * W * H * F * 0.0001;
+    const total = unit * Q;
+
+    const formatted = priceFormatter.format(total).replace("¥", "¥ ");
+    renderOdometer(formatted);
+
+    formulaEl.innerHTML =
+      `( <em>${L}</em> × <em>${W}</em> × <em>${H}</em> × <em>${F}</em> × 0.0001 ) × <em>${Q}</em>`;
+
+    traceVol.textContent    = `${L} × ${W} × ${H} mm³`;
+    traceMat.textContent    = mat.name;
+    traceFactor.textContent = `×${F}`;
+    traceMode.textContent   = mat.mode === "CUSTOM" ? "CUSTOM" : `PRESET · ${mat.group}`;
+    traceQty.textContent    = `${Q} pcs`;
+    traceUnit.textContent   = priceFormatter.format(unit).replace("¥", "¥ ");
+
+    return { total: Number(total.toFixed(2)), unit: Number(unit.toFixed(2)), mat, L, W, H, Q };
+  }
+
+  [lengthEl, widthEl, heightEl, quantityEl].forEach(el => {
+    el.addEventListener("input",  calculatePrice);
+    el.addEventListener("change", calculatePrice);
+  });
+  calculatePrice();
+
+  /* ============================================================
+   *  8. 校验 / 抖动
+   * ============================================================ */
+  function clearFieldError(inputEl, errEl) {
+    inputEl.classList.remove("input-error", "shake");
+    errEl.classList.add("hidden");
+  }
+  function showFieldError(inputEl, errEl, message) {
+    inputEl.classList.add("input-error");
+    void inputEl.offsetWidth;
+    inputEl.classList.add("shake");
+    errEl.textContent = message;
+    errEl.classList.remove("hidden");
+  }
+  nameEl.addEventListener("input",  () => clearFieldError(nameEl, nameErr));
+  phoneEl.addEventListener("input", () => clearFieldError(phoneEl, phoneErr));
+
+  /* ============================================================
+   *  图纸上传(前端占位 - 不上传文件,后续接 Supabase Storage)
+   * ============================================================ */
+  function fmtSize(n) {
+    if (n < 1024) return `${n} B`;
+    if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`;
+    return `${(n / 1024 / 1024).toFixed(2)} MB`;
+  }
+  function renderSelectedFile() {
+    const f = blueprintEl.files?.[0];
+    if (f) {
+      fileNameEl.textContent = `${f.name} · ${fmtSize(f.size)}`;
+      fileSelectedEl.classList.remove("hidden");
+    } else {
+      fileSelectedEl.classList.add("hidden");
+      fileNameEl.textContent = "";
+    }
+  }
+  blueprintEl.addEventListener("change", renderSelectedFile);
+  fileClearEl.addEventListener("click", (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    blueprintEl.value = "";
+    renderSelectedFile();
+  });
+  // 拖拽视觉反馈
+  ["dragenter", "dragover"].forEach(ev =>
+    fileDropArea.addEventListener(ev, e => {
+      e.preventDefault(); fileDropArea.classList.add("is-drag");
+    })
+  );
+  ["dragleave", "drop"].forEach(ev =>
+    fileDropArea.addEventListener(ev, e => {
+      e.preventDefault(); fileDropArea.classList.remove("is-drag");
+    })
+  );
+  fileDropArea.addEventListener("drop", e => {
+    const f = e.dataTransfer?.files?.[0];
+    if (f) {
+      const dt = new DataTransfer();
+      dt.items.add(f);
+      blueprintEl.files = dt.files;
+      renderSelectedFile();
+    }
+  });
+
+  /* ============================================================
+   *  9. 提交
+   * ============================================================ */
+  submitBtn.addEventListener("click", async () => {
+    const name  = nameEl.value.trim();
+    const phone = phoneEl.value.trim();
+
+    let valid = true;
+    if (!name)  { showFieldError(nameEl,  nameErr,  "请填写姓名");      valid = false; }
+    if (!phone) { showFieldError(phoneEl, phoneErr, "请填写联系电话"); valid = false; }
+    if (!valid) {
+      window.showToast({ type: "warning", title: "信息不完整", message: "请补全姓名与电话" });
+      return;
+    }
+
+    if (!sb) {
+      window.showToast({ type: "error", title: "未配置", message: "Supabase 凭证缺失,无法提交" });
+      return;
+    }
+
+    // 路由守卫:未登录 → 拦截并弹出登录卡
+    const { data: { session: curSess } } = await sb.auth.getSession();
+    if (!curSess) {
+      window.showToast({ type: "warning", title: "未登录", message: "请先登录后再提交订单", duration: 5000 });
+      setBodyState("is-guest");
+      return;
+    }
+
+    const r = calculatePrice();
+    if (r.mat.mode === "CUSTOM" && r.mat.factor <= 0) {
+      window.showToast({ type: "warning", title: "参数有误", message: "自定义系数必须大于 0" });
+      return;
+    }
+
+    // dimensions:尺寸文本快照(长×宽×高 + 体积),便于后台直接阅读订单
+    const volumeMm3 = r.L * r.W * r.H;
+    const dimensions = `${r.L}×${r.W}×${r.H} mm · 体积 ${volumeMm3.toLocaleString("zh-CN")} mm³`;
+
+    const payload = {
+      name, phone,
+      // 结构化字段(后续报表/筛选用)
+      length:          r.L,
+      width:           r.W,
+      height:          r.H,
+      material_factor: r.mat.factor,
+      // 订单核心字段
+      material:         r.mat.name,
+      dimensions,
+      quantity:         r.Q,
+      calculated_price: r.total,
+      status:           "1_待付款",
+      created_at:       new Date().toISOString(),
+    };
+
+    submitBtn.disabled = true;
+    const btnSpan = submitBtn.querySelector("span");
+    const original = btnSpan.textContent;
+    btnSpan.textContent = "▶ 正在提交...";
+
+    try {
+      const { data, error } = await sb.from("leads").insert([payload]).select();
+      if (error) throw error;
+
+      const inserted = Array.isArray(data) ? data[0] : data;
+      const newId = inserted?.id;
+      window.showToast({ type: "success", title: "订单已生成", message: "即将跳转至收银台" });
+      btnSpan.textContent = "✓ 已生成,前往收银台...";
+      setTimeout(() => {
+        window.location.href = newId ? `checkout.html?id=${newId}` : "checkout.html";
+      }, 600);
+    } catch (err) {
+      console.error("✗ 提交失败:", err);
+      window.showToast({
+        type: "error",
+        title: "提交失败",
+        message: err.message || JSON.stringify(err),
+        duration: 6000,
+      });
+      submitBtn.disabled = false;
+      btnSpan.textContent = original;
+    }
+  });
+</script>
+
+</body>
+</html>

@@ -1,0 +1,345 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>提交成功 · CNC Console</title>
+
+<script src="https://cdn.tailwindcss.com"></script>
+
+<style>
+  :root {
+    --bg-0: #0a0a0a;
+    --line: #26262d;
+    --line-2: #34343d;
+    --accent: #f59e0b;
+    --cyan: #22d3ee;
+    --ok: #10b981;
+    --text-0: #e5e7eb;
+    --text-1: #9ca3af;
+    --text-2: #6b7280;
+  }
+
+  html, body {
+    font-family: "JetBrains Mono", "SF Mono", "Cascadia Code", Consolas,
+                 "PingFang SC", "Microsoft YaHei", monospace;
+    background:
+      radial-gradient(1200px 600px at 20% -10%, rgba(16,185,129,0.10), transparent 60%),
+      radial-gradient(900px 500px at 110% 110%, rgba(34,211,238,0.06), transparent 60%),
+      var(--bg-0);
+    color: var(--text-0);
+    min-height: 100vh;
+  }
+
+  /* ---------- 控制台网格背景 ---------- */
+  body::before {
+    content: "";
+    position: fixed; inset: 0;
+    background-image:
+      linear-gradient(rgba(255,255,255,.022) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(255,255,255,.022) 1px, transparent 1px);
+    background-size: 32px 32px;
+    pointer-events: none;
+    z-index: 0;
+  }
+
+  /* ---------- 标签徽章 ---------- */
+  .chip {
+    display: inline-flex; align-items: center; gap: 6px;
+    padding: 3px 9px;
+    font-size: 11px;
+    letter-spacing: .12em;
+    text-transform: uppercase;
+    color: var(--text-1);
+    border: 1px solid var(--line-2);
+    border-radius: 4px;
+    background: rgba(255,255,255,0.02);
+  }
+  .chip .dot {
+    width: 6px; height: 6px; border-radius: 50%;
+    background: var(--ok);
+    box-shadow: 0 0 8px var(--ok);
+    animation: blink 1.4s ease-in-out infinite;
+  }
+  @keyframes blink {
+    0%,100% { opacity: 1; }
+    50%     { opacity: .35; }
+  }
+
+  /* ---------- 玻璃拟态卡片 ---------- */
+  .glass {
+    background: linear-gradient(180deg, rgba(22,22,27,.72), rgba(17,17,20,.55));
+    border: 1px solid var(--line);
+    border-radius: 18px;
+    backdrop-filter: blur(18px) saturate(1.2);
+    -webkit-backdrop-filter: blur(18px) saturate(1.2);
+    position: relative;
+    overflow: hidden;
+  }
+  .glass::before {
+    content: "";
+    position: absolute; inset: 0;
+    border-radius: 18px;
+    box-shadow:
+      inset 0 1px 0 rgba(255,255,255,0.06),
+      inset 0 -1px 0 rgba(0,0,0,0.5);
+    pointer-events: none;
+  }
+  .glass::after {
+    content: "";
+    position: absolute; left: 0; right: 0; height: 14px;
+    background: linear-gradient(180deg, transparent, rgba(16,185,129,.07), transparent);
+    animation: scan 5s linear infinite;
+    pointer-events: none;
+  }
+  @keyframes scan {
+    0%   { transform: translateY(-30px); }
+    100% { transform: translateY(600px); }
+  }
+
+  /* ---------- 成功图标:同心环 + 勾 ---------- */
+  .ring-wrap {
+    position: relative;
+    width: 160px; height: 160px;
+    margin: 0 auto;
+  }
+  .ring-wrap::before,
+  .ring-wrap::after {
+    content: "";
+    position: absolute; inset: 0;
+    border-radius: 50%;
+    border: 1px solid rgba(16,185,129,.35);
+  }
+  .ring-wrap::before {
+    animation: pulse-ring 2.2s ease-out infinite;
+  }
+  .ring-wrap::after {
+    animation: pulse-ring 2.2s ease-out infinite;
+    animation-delay: 1.1s;
+  }
+  @keyframes pulse-ring {
+    0%   { transform: scale(0.65); opacity: .9; }
+    100% { transform: scale(1.35); opacity: 0; }
+  }
+  .ring-core {
+    position: absolute; inset: 24px;
+    border-radius: 50%;
+    background:
+      radial-gradient(circle at 50% 35%, rgba(16,185,129,.22), transparent 65%),
+      linear-gradient(180deg, #0f1614, #07100d);
+    border: 1px solid rgba(16,185,129,.45);
+    display: flex; align-items: center; justify-content: center;
+    box-shadow:
+      0 0 40px rgba(16,185,129,.25),
+      inset 0 0 24px rgba(16,185,129,.12);
+    animation: pop-in .55s cubic-bezier(.2,.8,.2,1) both;
+  }
+  @keyframes pop-in {
+    0%   { opacity: 0; transform: scale(0.7); }
+    60%  { opacity: 1; transform: scale(1.06); }
+    100% { transform: scale(1); }
+  }
+  .ring-core svg { width: 56px; height: 56px; }
+  .check-path {
+    stroke-dasharray: 48;
+    stroke-dashoffset: 48;
+    animation: draw-check .7s ease-out forwards;
+    animation-delay: .35s;
+  }
+  @keyframes draw-check { to { stroke-dashoffset: 0; } }
+
+  /* ---------- 文案渐入 ---------- */
+  @keyframes fade-up {
+    from { opacity: 0; transform: translateY(10px); }
+    to   { opacity: 1; transform: translateY(0); }
+  }
+  .fade-1 { animation: fade-up .55s ease-out .55s both; }
+  .fade-2 { animation: fade-up .55s ease-out .75s both; }
+  .fade-3 { animation: fade-up .55s ease-out .95s both; }
+  .fade-4 { animation: fade-up .55s ease-out 1.15s both; }
+
+  /* ---------- 返回按钮 ---------- */
+  .back-btn {
+    --depth: 4px;
+    display: inline-flex; align-items: center; gap: 10px;
+    padding: 14px 28px;
+    border: 1px solid var(--line-2);
+    border-radius: 10px;
+    background:
+      linear-gradient(180deg, #0d1d16 0%, #07120d 60%, #040a07 100%);
+    color: #6ee7b7;
+    font-family: inherit;
+    font-size: 13px;
+    font-weight: 700;
+    letter-spacing: .22em;
+    text-transform: uppercase;
+    cursor: pointer;
+    text-decoration: none;
+    box-shadow:
+      0 var(--depth) 0 0 #050505,
+      0 calc(var(--depth) + 2px) 12px rgba(0,0,0,.5),
+      inset 0 1px 0 rgba(16,185,129,.18);
+    text-shadow: 0 0 12px rgba(16,185,129,.35);
+    transition: transform .08s ease-out, box-shadow .08s ease-out, background-color .3s ease;
+  }
+  .back-btn:hover {
+    background: linear-gradient(180deg, #112a20 0%, #0a1812 60%, #050d09 100%);
+  }
+  .back-btn:active {
+    transform: translateY(var(--depth));
+    box-shadow:
+      0 0 0 0 #050505,
+      inset 0 1px 4px rgba(0,0,0,.6);
+  }
+
+  /* ---------- 状态条 ---------- */
+  .status-row {
+    display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px;
+  }
+  .status-cell {
+    background: rgba(255,255,255,.02);
+    border: 1px solid var(--line-2);
+    border-radius: 8px;
+    padding: 12px 14px;
+    text-align: center;
+  }
+  .status-cell .lbl {
+    font-size: 10px;
+    letter-spacing: .22em;
+    text-transform: uppercase;
+    color: var(--text-2);
+  }
+  .status-cell .val {
+    font-size: 13px;
+    font-weight: 700;
+    margin-top: 4px;
+    color: var(--text-0);
+  }
+  .status-cell.ok .val { color: #34d399; }
+
+  /* 倒计时显示 */
+  #countdown {
+    color: var(--accent);
+    font-weight: 700;
+  }
+</style>
+</head>
+
+<body class="antialiased">
+
+<div class="relative z-10 min-h-screen flex flex-col items-center justify-center px-4 py-10">
+
+  <header class="w-full max-w-2xl flex items-center justify-between mb-6">
+    <div class="flex items-center gap-3">
+      <div class="w-10 h-10 rounded-lg flex items-center justify-center border"
+           style="background: linear-gradient(135deg,#0d1d16,#040a07); border-color: rgba(16,185,129,.45); box-shadow: 0 0 18px rgba(16,185,129,.25) inset;">
+        <span style="color:#34d399; font-size:18px;">✓</span>
+      </div>
+      <div>
+        <div class="text-sm font-bold tracking-widest">CNC&nbsp;CONSOLE</div>
+        <div class="text-[10px] tracking-[.22em] uppercase" style="color:var(--text-2)">Confirmation Channel</div>
+      </div>
+    </div>
+    <div class="chip"><span class="dot"></span><span>STATUS&nbsp;·&nbsp;OK</span></div>
+  </header>
+
+  <main class="glass w-full max-w-2xl px-8 sm:px-12 py-12 sm:py-14 text-center">
+
+    <div class="ring-wrap">
+      <div class="ring-core">
+        <svg viewBox="0 0 24 24" fill="none" stroke="#34d399" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+          <path class="check-path" d="M5 12.5l4.5 4.5L19 7.5" />
+        </svg>
+      </div>
+    </div>
+
+    <div class="fade-1 mt-8">
+      <div class="chip" id="topChip" style="border-color: rgba(16,185,129,.4); color:#6ee7b7;">
+        <span class="dot"></span>
+        <span id="topChipText">Submitted&nbsp;·&nbsp;已写入数据库</span>
+      </div>
+    </div>
+
+    <h1 id="headTitle" class="fade-2 mt-4 text-3xl sm:text-4xl font-bold tracking-tight"
+        style="background: linear-gradient(180deg,#ffffff,#a7f3d0); -webkit-background-clip:text; background-clip:text; color:transparent;">
+      提交成功!
+    </h1>
+
+    <p id="headBody" class="fade-3 mt-3 text-sm leading-relaxed" style="color:var(--text-1)">
+      感谢注册,我们的工作人员将通过您预留的手机号联系您
+    </p>
+
+    <div class="fade-4 mt-8 status-row" id="statusRow">
+      <div class="status-cell ok">
+        <div class="lbl" data-k="cell1-lbl">Order</div>
+        <div class="val" data-k="cell1-val">RECEIVED</div>
+      </div>
+      <div class="status-cell ok">
+        <div class="lbl" data-k="cell2-lbl">Queue</div>
+        <div class="val" data-k="cell2-val">PENDING</div>
+      </div>
+      <div class="status-cell ok">
+        <div class="lbl" data-k="cell3-lbl">Contact</div>
+        <div class="val" data-k="cell3-val">&lt; 24H</div>
+      </div>
+    </div>
+
+    <div class="fade-4 mt-9 flex flex-col items-center gap-3">
+      <a href="index.html" class="back-btn">
+        <span>◀</span><span>返回控制台</span>
+      </a>
+      <p class="text-[11px] tracking-[.18em] uppercase" style="color:var(--text-2)">
+        将于 <span id="countdown">10</span> 秒后自动返回
+      </p>
+    </div>
+
+  </main>
+
+  <footer class="mt-8 text-[10px] tracking-[.22em] uppercase text-center" style="color:var(--text-2)">
+    © 2026 CNC Pricing Console · Powered by Supabase
+  </footer>
+
+</div>
+
+<script>
+  /* ============================================================
+   *  根据 URL 参数切换页面文案
+   *    success.html             → 默认 (订单已提交)
+   *    success.html?paid=1&id=N → 支付完成态 (待派单)
+   * ============================================================ */
+  (function patchContent(){
+    const p = new URLSearchParams(location.search);
+    if(p.get("paid") !== "1") return;
+
+    const orderId = p.get("id");
+    const orderNo = orderId ? "CNC-" + String(orderId).padStart(6,"0") : "—";
+
+    document.getElementById("topChipText").textContent = "Paid · 定金已收 · 待派单";
+    document.getElementById("headTitle").textContent   = "支付成功!";
+    document.getElementById("headBody").innerHTML =
+      `定金已收,订单 <span style="color:#fbbf24;font-weight:700">${orderNo}</span> 已进入派单队列,工厂抢单后将自动开始加工。`;
+
+    const setKV = (k, v) => {
+      const el = document.querySelector(`[data-k="${k}"]`);
+      if(el) el.textContent = v;
+    };
+    setKV("cell1-lbl", "Status");   setKV("cell1-val", "待派单");
+    setKV("cell2-lbl", "Deposit");  setKV("cell2-val", "已收款");
+    setKV("cell3-lbl", "Next");     setKV("cell3-val", "等待抢单");
+  })();
+
+  /* 自动倒计时返回 */
+  let remain = 10;
+  const cd = document.getElementById("countdown");
+  const timer = setInterval(() => {
+    remain -= 1;
+    if (cd) cd.textContent = String(remain);
+    if (remain <= 0) {
+      clearInterval(timer);
+      window.location.href = "index.html";
+    }
+  }, 1000);
+</script>
+
+</body>
+</html>

@@ -1,0 +1,453 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>订单收银台 · CNC Console</title>
+
+<script src="https://cdn.tailwindcss.com"></script>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="config.js"></script>
+
+<style>
+  :root {
+    --bg-0:#0a0a0a; --bg-1:#111114; --bg-2:#16161b;
+    --line:#26262d; --line-2:#34343d;
+    --accent:#f59e0b; --accent-2:#fb923c;
+    --cyan:#22d3ee; --ok:#10b981; --danger:#ef4444;
+    --text-0:#e5e7eb; --text-1:#9ca3af; --text-2:#6b7280;
+  }
+  html,body{
+    font-family:"JetBrains Mono","SF Mono","Cascadia Code",Consolas,"PingFang SC","Microsoft YaHei",monospace;
+    background:
+      radial-gradient(1100px 600px at 20% -10%,rgba(245,158,11,.07),transparent 60%),
+      radial-gradient(900px 500px at 110% 110%,rgba(34,211,238,.05),transparent 60%),
+      var(--bg-0);
+    color:var(--text-0); min-height:100vh;
+  }
+  body::before{
+    content:"";position:fixed;inset:0;
+    background-image:
+      linear-gradient(rgba(255,255,255,.022) 1px,transparent 1px),
+      linear-gradient(90deg,rgba(255,255,255,.022) 1px,transparent 1px);
+    background-size:32px 32px;pointer-events:none;z-index:0;
+  }
+
+  /* chip */
+  .chip{display:inline-flex;align-items:center;gap:6px;padding:3px 9px;font-size:11px;
+    letter-spacing:.12em;text-transform:uppercase;color:var(--text-1);
+    border:1px solid var(--line-2);border-radius:4px;background:rgba(255,255,255,.02)}
+  .chip .dot{width:6px;height:6px;border-radius:50%;background:var(--accent);box-shadow:0 0 8px var(--accent);animation:blink 1.4s ease-in-out infinite}
+  .chip.cyan .dot{background:var(--cyan);box-shadow:0 0 8px var(--cyan)}
+  .chip.ok   .dot{background:var(--ok);  box-shadow:0 0 8px var(--ok)}
+  @keyframes blink{0%,100%{opacity:1}50%{opacity:.35}}
+
+  /* panel */
+  .panel{background:linear-gradient(180deg,var(--bg-1),var(--bg-2));
+    border:1px solid var(--line);border-radius:14px;position:relative}
+
+  /* receipt - 半透明玻璃质感 */
+  .receipt{
+    position:relative;
+    background:linear-gradient(180deg,rgba(22,22,27,.82),rgba(13,13,16,.7));
+    border:1px solid var(--line);border-radius:16px;
+    backdrop-filter:blur(14px) saturate(1.2);
+    -webkit-backdrop-filter:blur(14px) saturate(1.2);
+    overflow:hidden;
+  }
+  .receipt::after{
+    content:"";position:absolute;left:0;right:0;bottom:0;height:1px;
+    background:linear-gradient(90deg,transparent,var(--accent),transparent);
+    opacity:.5;
+  }
+  .scanline{
+    position:absolute;left:0;right:0;height:14px;
+    background:linear-gradient(180deg,transparent,rgba(245,158,11,.07),transparent);
+    pointer-events:none;animation:scan 4.6s linear infinite;
+  }
+  @keyframes scan{0%{transform:translateY(-30px)}100%{transform:translateY(700px)}}
+
+  .row{display:flex;justify-content:space-between;align-items:center;padding:10px 0;
+    border-bottom:1px dashed var(--line-2);font-size:13px}
+  .row:last-child{border-bottom:none}
+  .row .lbl{color:var(--text-2);letter-spacing:.06em;text-transform:uppercase;font-size:10.5px}
+  .row .val{color:var(--text-0);text-align:right}
+
+  .total-pill{
+    background:radial-gradient(circle at 50% 30%,rgba(245,158,11,.12),transparent 65%),
+               linear-gradient(180deg,#0d0d10,#050507);
+    border:1px solid var(--line-2);border-radius:10px;
+    padding:18px 20px;display:flex;align-items:center;justify-content:space-between;
+  }
+  .deposit-num{
+    font-family:"JetBrains Mono",monospace;font-variant-numeric:tabular-nums;
+    color:var(--accent);font-size:38px;font-weight:700;letter-spacing:-.01em;
+    text-shadow:0 0 18px rgba(245,158,11,.55),0 0 6px rgba(245,158,11,.35);
+  }
+
+  /* 大支付按钮 - 机床启动键 */
+  .pay-btn{
+    --depth:6px;
+    position:relative;width:100%;padding:22px 24px;
+    border:1px solid var(--line-2);border-radius:12px;
+    background:linear-gradient(180deg,#2a1c08 0%,#1a1206 60%,#0d0904 100%);
+    color:var(--accent);font-family:inherit;font-size:16px;font-weight:700;
+    letter-spacing:.26em;text-transform:uppercase;cursor:pointer;
+    box-shadow:
+      0 var(--depth) 0 0 #050505,
+      0 calc(var(--depth) + 4px) 16px rgba(0,0,0,.6),
+      inset 0 1px 0 rgba(245,158,11,.18),
+      inset 0 -1px 0 rgba(0,0,0,.6);
+    text-shadow:0 0 14px rgba(245,158,11,.5);
+    transform:translateY(0);
+    transition:transform .08s ease-out,box-shadow .08s ease-out,background-color .3s ease;
+  }
+  .pay-btn::before{
+    content:"";position:absolute;left:18px;top:50%;transform:translateY(-50%);
+    width:9px;height:9px;border-radius:50%;background:var(--accent);
+    box-shadow:0 0 14px var(--accent);
+    animation:blink 1.2s ease-in-out infinite;
+  }
+  .pay-btn:hover:not(:disabled){background:linear-gradient(180deg,#3a2710 0%,#221606 60%,#100a04 100%)}
+  .pay-btn:active:not(:disabled){
+    transform:translateY(var(--depth));
+    box-shadow:0 0 0 0 #050505,0 2px 6px rgba(0,0,0,.5),inset 0 1px 4px rgba(0,0,0,.7);
+  }
+  .pay-btn:disabled{opacity:.6;cursor:not-allowed}
+
+  .status-pill{
+    display:inline-flex;align-items:center;gap:6px;padding:3px 9px;font-size:11px;
+    letter-spacing:.14em;text-transform:uppercase;color:var(--accent);
+    border:1px solid rgba(245,158,11,.4);border-radius:999px;background:rgba(245,158,11,.06)
+  }
+  .status-pill .dot{width:6px;height:6px;border-radius:50%;background:var(--accent);
+    box-shadow:0 0 8px var(--accent);animation:blink 1.4s ease-in-out infinite}
+
+  /* 步骤进度条 */
+  .steps{display:grid;grid-template-columns:repeat(5,1fr);gap:8px;margin-bottom:18px}
+  .step{padding:9px 8px;border:1px solid var(--line-2);border-radius:6px;
+    font-size:10px;letter-spacing:.14em;text-transform:uppercase;text-align:center;
+    color:var(--text-2);background:rgba(255,255,255,.015);position:relative}
+  .step .n{font-size:14px;color:var(--text-1);font-weight:700;display:block;margin-bottom:3px}
+  .step.active{
+    color:var(--accent);border-color:var(--accent);
+    background:rgba(245,158,11,.06);
+    box-shadow:0 0 18px rgba(245,158,11,.08) inset;
+  }
+  .step.active .n{color:var(--accent)}
+  .step.done{color:#34d399;border-color:rgba(16,185,129,.4);background:rgba(16,185,129,.05)}
+  .step.done .n{color:#34d399}
+
+  /* 处理中遮罩 */
+  .processing{
+    position:absolute;inset:0;background:rgba(8,8,10,.78);
+    backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px);
+    display:flex;align-items:center;justify-content:center;flex-direction:column;gap:14px;
+    border-radius:16px;z-index:5;
+    animation:fade-in .3s ease;
+  }
+  @keyframes fade-in{from{opacity:0}to{opacity:1}}
+  .processing .spinner{
+    width:42px;height:42px;border:2px solid rgba(245,158,11,.18);
+    border-top-color:var(--accent);border-radius:50%;animation:spin 1s linear infinite;
+  }
+  @keyframes spin{to{transform:rotate(360deg)}}
+  .processing .pl{font-size:11px;letter-spacing:.25em;text-transform:uppercase;color:var(--text-1)}
+  .processing .pl em{color:var(--accent);font-style:normal}
+
+  /* TOAST 系统 - 与主控制台一致 */
+  .toast-stack{position:fixed;top:22px;right:22px;z-index:9999;display:flex;flex-direction:column;
+    gap:10px;pointer-events:none;max-width:calc(100vw - 44px)}
+  @media(max-width:640px){.toast-stack{left:12px;right:12px;top:12px}}
+  .toast{pointer-events:auto;min-width:280px;max-width:380px;padding:13px 14px 13px 18px;
+    border:1px solid var(--toast-color,var(--cyan));
+    background:linear-gradient(180deg,rgba(20,15,8,.92),rgba(8,8,10,.92));
+    border-radius:4px;display:flex;gap:12px;align-items:flex-start;position:relative;overflow:hidden;
+    backdrop-filter:blur(10px) saturate(1.2);-webkit-backdrop-filter:blur(10px) saturate(1.2);
+    box-shadow:0 8px 28px rgba(0,0,0,.55),0 0 18px var(--toast-color,var(--cyan)) inset;
+    font-family:inherit;animation:toast-in .42s cubic-bezier(.2,.85,.25,1.05) both}
+  .toast.out{animation:toast-out .32s cubic-bezier(.4,0,.2,1) forwards}
+  @keyframes toast-in{0%{transform:translateX(140%) skewX(-6deg);opacity:0;filter:blur(6px)}60%{transform:translateX(-4%) skewX(0);opacity:1;filter:blur(0)}100%{transform:translateX(0)}}
+  @keyframes toast-out{to{transform:translateX(60px) scale(.94);opacity:0;filter:blur(3px)}}
+  .toast::before{content:"";position:absolute;left:0;top:0;bottom:0;width:3px;background:var(--toast-color);box-shadow:0 0 14px var(--toast-color)}
+  .toast::after{content:"";position:absolute;left:0;right:0;bottom:0;height:2px;
+    background:linear-gradient(90deg,var(--toast-color),transparent);transform-origin:left;
+    animation:toast-progress var(--toast-duration,4000ms) linear forwards;opacity:.65}
+  @keyframes toast-progress{from{transform:scaleX(1)}to{transform:scaleX(0)}}
+  .toast-icon{width:26px;height:26px;flex-shrink:0;border-radius:4px;background:rgba(0,0,0,.45);
+    border:1px solid var(--toast-color);display:flex;align-items:center;justify-content:center;
+    color:var(--toast-color);font-size:13px;font-weight:700;
+    box-shadow:0 0 10px var(--toast-color) inset,0 0 6px var(--toast-color)}
+  .toast-body{flex:1;min-width:0}
+  .toast-title{color:var(--text-0);font-size:11px;letter-spacing:.18em;text-transform:uppercase;font-weight:700}
+  .toast-title em{color:var(--toast-color);font-style:normal;margin-left:6px;text-shadow:0 0 8px var(--toast-color)}
+  .toast-message{font-size:12.5px;color:var(--text-1);margin-top:4px;line-height:1.45;word-break:break-word}
+  .toast-close{background:transparent;border:none;color:var(--text-2);cursor:pointer;padding:2px 4px;font-size:12px;line-height:1}
+  .toast-close:hover{color:var(--text-0)}
+  .toast.success{--toast-color:#10b981}.toast.error{--toast-color:#ef4444}
+  .toast.warning{--toast-color:#f59e0b}.toast.info{--toast-color:#22d3ee}
+</style>
+</head>
+
+<body class="antialiased">
+
+<div id="toast-stack" class="toast-stack"></div>
+
+<div class="relative z-10 min-h-screen px-4 py-8 max-w-3xl mx-auto">
+
+  <header class="flex items-center justify-between mb-6">
+    <a href="index.html" class="flex items-center gap-3" style="text-decoration:none;color:inherit">
+      <div class="w-10 h-10 rounded-lg flex items-center justify-center border border-amber-500/40"
+           style="background:linear-gradient(135deg,#1a1206,#0d0904);box-shadow:0 0 18px rgba(245,158,11,.25) inset;">
+        <span style="color:var(--accent);font-size:18px">⚙</span>
+      </div>
+      <div>
+        <div class="text-sm font-bold tracking-widest">CNC&nbsp;CONSOLE</div>
+        <div class="text-[10px] tracking-[.22em] uppercase" style="color:var(--text-2)">Checkout · 订单收银台</div>
+      </div>
+    </a>
+    <div class="chip"><span class="dot"></span><span>STEP&nbsp;01&nbsp;·&nbsp;支付定金</span></div>
+  </header>
+
+  <!-- 订单状态进度 -->
+  <div class="steps">
+    <div class="step active"><span class="n">01</span>待付款</div>
+    <div class="step"><span class="n">02</span>待派单</div>
+    <div class="step"><span class="n">03</span>加工中</div>
+    <div class="step"><span class="n">04</span>已发货</div>
+    <div class="step"><span class="n">05</span>已完成</div>
+  </div>
+
+  <!-- 收银台主卡 -->
+  <main class="receipt p-7 sm:p-9">
+    <div class="scanline"></div>
+
+    <div id="loadView" class="py-10 text-center">
+      <div style="font-size:11px;letter-spacing:.25em;text-transform:uppercase;color:var(--text-2)">
+        FETCHING ORDER...
+      </div>
+      <div class="mt-3" style="width:28px;height:28px;border:2px solid rgba(245,158,11,.18);border-top-color:var(--accent);border-radius:50%;animation:spin 1s linear infinite;margin:0 auto"></div>
+    </div>
+
+    <div id="errorView" class="hidden py-10 text-center">
+      <div style="color:var(--danger);font-weight:700;letter-spacing:.14em;text-transform:uppercase">订单加载失败</div>
+      <div id="errorMsg" class="mt-2" style="font-size:12px;color:var(--text-1)"></div>
+      <a href="index.html" class="inline-block mt-5" style="font-size:11px;color:var(--accent);border-bottom:1px dashed var(--accent);text-decoration:none">◀ 返回控制台</a>
+    </div>
+
+    <div id="orderView" class="hidden">
+      <div class="flex items-center justify-between mb-5">
+        <div>
+          <div class="chip cyan mb-2"><span class="dot"></span><span>Order&nbsp;·&nbsp;订单详情</span></div>
+          <div class="text-xs" style="color:var(--text-2)">订单号</div>
+          <div class="text-xl font-bold tracking-wider" id="orderNo" style="color:var(--text-0)">—</div>
+        </div>
+        <div id="statusPill" class="status-pill"><span class="dot"></span><span>1_待付款</span></div>
+      </div>
+
+      <div class="mt-3">
+        <div class="row"><span class="lbl">Customer / 客户</span><span class="val" id="rCustomer">—</span></div>
+        <div class="row"><span class="lbl">Phone / 电话</span><span class="val" id="rPhone">—</span></div>
+        <div class="row"><span class="lbl">Material / 材料</span><span class="val" id="rMaterial">—</span></div>
+        <div class="row"><span class="lbl">Dimensions / 尺寸</span><span class="val" id="rDim">—</span></div>
+        <div class="row"><span class="lbl">Quantity / 数量</span><span class="val" id="rQty">—</span></div>
+        <div class="row"><span class="lbl">Estimated Price / 预估总价</span><span class="val" id="rPrice">—</span></div>
+      </div>
+
+      <div class="total-pill mt-6">
+        <div>
+          <div style="font-size:10px;letter-spacing:.22em;text-transform:uppercase;color:var(--text-2)">
+            Deposit · 应付定金 (20%)
+          </div>
+          <div style="font-size:11px;color:var(--text-1);margin-top:6px">
+            余款 <span id="balance" style="color:var(--text-0)">—</span> 于发货后结算
+          </div>
+        </div>
+        <div class="deposit-num" id="depositNum">¥ 0.00</div>
+      </div>
+
+      <button id="payBtn" class="pay-btn mt-6" type="button">
+        <span class="ml-7" id="payBtnText">▶ 模拟支付 · CONFIRM PAYMENT</span>
+      </button>
+
+      <p class="mt-3 text-center" style="font-size:10.5px;color:var(--text-2);letter-spacing:.12em">
+        ⓘ 当前为演示版,点击即视为已收款,真实环境会接入微信 / 支付宝 / Stripe
+      </p>
+    </div>
+  </main>
+
+  <footer class="mt-8 text-[10px] tracking-[.22em] uppercase text-center" style="color:var(--text-2)">
+    © 2026 CNC Pricing Console · Checkout Center
+  </footer>
+</div>
+
+<script>
+  /* ============================================================
+   *  Toast - 与主控制台一致
+   * ============================================================ */
+  (function(){
+    const stack=document.getElementById("toast-stack");
+    const ICONS={success:"✓",error:"✕",warning:"!",info:"i"};
+    const esc=s=>String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+    window.showToast=function({type="info",title="",message="",duration=4000}={}){
+      const t=document.createElement("div");
+      t.className=`toast ${type}`;
+      t.style.setProperty("--toast-duration",`${duration}ms`);
+      t.innerHTML=`<div class="toast-icon">${ICONS[type]||"i"}</div>
+        <div class="toast-body"><div class="toast-title">${esc(title)} <em>${esc(type.toUpperCase())}</em></div>
+        ${message?`<div class="toast-message">${esc(message)}</div>`:""}</div>
+        <button class="toast-close">✕</button>`;
+      stack.appendChild(t);
+      const close=()=>{t.classList.add("out");setTimeout(()=>t.remove(),320)};
+      t.querySelector(".toast-close").addEventListener("click",close);
+      const tm=setTimeout(close,duration);
+      t.addEventListener("mouseenter",()=>clearTimeout(tm));
+    };
+  })();
+
+  /* ============================================================
+   *  Supabase init + Auth guard
+   * ============================================================ */
+  const ENV=window.env||{};
+  let sb=null;
+  try{
+    if((ENV.SUPABASE_URL||"").startsWith("http") && (ENV.SUPABASE_ANON_KEY||"").length>20){
+      sb=window.supabase.createClient(ENV.SUPABASE_URL,ENV.SUPABASE_ANON_KEY,{
+        auth:{persistSession:true,autoRefreshToken:true,detectSessionInUrl:true}
+      });
+    }
+  }catch(e){console.error(e);}
+
+  const params=new URLSearchParams(location.search);
+  const orderId=params.get("id");
+
+  const loadView=document.getElementById("loadView");
+  const orderView=document.getElementById("orderView");
+  const errorView=document.getElementById("errorView");
+  const errorMsg=document.getElementById("errorMsg");
+  const payBtn=document.getElementById("payBtn");
+  const payBtnText=document.getElementById("payBtnText");
+
+  function showError(msg){
+    loadView.classList.add("hidden");
+    orderView.classList.add("hidden");
+    errorView.classList.remove("hidden");
+    errorMsg.textContent=msg;
+  }
+
+  const cny=new Intl.NumberFormat("zh-CN",{style:"currency",currency:"CNY",minimumFractionDigits:2,maximumFractionDigits:2});
+  const fmt=v=>cny.format(Number(v||0)).replace("¥","¥ ");
+
+  let currentOrder=null;
+  let depositAmount=0;
+
+  async function bootstrap(){
+    if(!sb){ showError("Supabase 凭证缺失,请检查 config.js / 环境变量"); return; }
+    const { data:{ session } } = await sb.auth.getSession();
+    if(!session){
+      window.showToast({type:"warning",title:"未登录",message:"请先在控制台登录"});
+      setTimeout(()=>{ location.href="index.html"; }, 1200);
+      return;
+    }
+    if(!orderId){ showError("缺少订单 ID,无法继续支付"); return; }
+
+    const { data, error } = await sb
+      .from("leads")
+      .select("*")
+      .eq("id", orderId)
+      .single();
+
+    if(error || !data){
+      showError(error?.message || "找不到该订单");
+      return;
+    }
+
+    currentOrder = data;
+    renderOrder(data);
+  }
+
+  function renderOrder(o){
+    document.getElementById("orderNo").textContent = "CNC-" + String(o.id).padStart(6,"0");
+    document.getElementById("rCustomer").textContent = o.name || "—";
+    document.getElementById("rPhone").textContent    = maskPhone(o.phone);
+    document.getElementById("rMaterial").textContent = o.material || "—";
+    document.getElementById("rDim").textContent      = o.dimensions || `${o.length}×${o.width}×${o.height||0} mm`;
+    document.getElementById("rQty").textContent      = `${o.quantity} pcs`;
+    document.getElementById("rPrice").textContent    = fmt(o.calculated_price);
+
+    depositAmount = Math.round(Number(o.calculated_price) * 0.2 * 100) / 100;
+    document.getElementById("depositNum").textContent = fmt(depositAmount);
+    document.getElementById("balance").textContent    = fmt(Number(o.calculated_price) - depositAmount);
+    document.getElementById("statusPill").querySelector("span:last-child").textContent = o.status || "1_待付款";
+
+    // 若已付款过,禁用按钮提示
+    if(o.status && o.status !== "1_待付款"){
+      payBtn.disabled = true;
+      payBtnText.textContent = `✓ 已支付 · 当前状态:${o.status}`;
+      window.showToast({type:"info",title:"订单已支付",message:`当前状态:${o.status}`,duration:5000});
+    }
+
+    loadView.classList.add("hidden");
+    orderView.classList.remove("hidden");
+  }
+
+  function maskPhone(p){
+    if(!p) return "—";
+    const s=String(p);
+    if(s.length<7) return s;
+    return s.slice(0,3) + "****" + s.slice(-4);
+  }
+
+  /* ============================================================
+   *  模拟支付
+   * ============================================================ */
+  payBtn.addEventListener("click", async ()=>{
+    if(!currentOrder) return;
+    if(!sb) return;
+
+    // 处理中遮罩
+    const overlay = document.createElement("div");
+    overlay.className = "processing";
+    overlay.innerHTML = `
+      <div class="spinner"></div>
+      <div class="pl">SECURING TRANSACTION · <em>支付通道建立中</em></div>
+    `;
+    document.querySelector(".receipt").appendChild(overlay);
+
+    payBtn.disabled = true;
+    payBtnText.textContent = "▶ 正在处理...";
+
+    // 模拟一个支付延迟
+    await new Promise(r => setTimeout(r, 1400));
+
+    try{
+      const { data, error } = await sb
+        .from("leads")
+        .update({
+          status: "2_待派单",
+          deposit_amount: depositAmount,
+          paid_at: new Date().toISOString(),
+        })
+        .eq("id", currentOrder.id)
+        .select()
+        .single();
+
+      if(error) throw error;
+
+      window.showToast({type:"success",title:"支付成功",message:`已收款 ${fmt(depositAmount)} · 已转入派单队列`});
+      payBtnText.textContent = "✓ 支付完成,准备跳转...";
+      setTimeout(()=>{ location.href = `success.html?paid=1&id=${currentOrder.id}`; }, 900);
+    }catch(err){
+      console.error(err);
+      overlay.remove();
+      payBtn.disabled = false;
+      payBtnText.textContent = "▶ 模拟支付 · CONFIRM PAYMENT";
+      window.showToast({type:"error",title:"支付失败",message:err.message||"请重试",duration:6000});
+    }
+  });
+
+  bootstrap();
+</script>
+
+</body>
+</html>
