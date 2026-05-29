@@ -1,0 +1,11 @@
+# ============================================================
+#  Cloudflare Pages 头部规则
+#  与 vercel.json 中的 headers 保持等价。
+#  https://developers.cloudflare.com/pages/configuration/headers/
+# ============================================================
+
+/*
+  X-Content-Type-Options: nosniff
+  X-Frame-Options: DENY
+  Referrer-Policy: strict-origin-when-cross-origin
+  Permissions-Policy: camera=(), microphone=(), geolocation=()
