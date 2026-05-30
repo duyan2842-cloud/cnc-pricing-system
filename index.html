@@ -1085,8 +1085,9 @@
    *  2. Supabase 初始化(从 window.env 读取凭证)
    * ============================================================ */
   const ENV = window.env || {};
-  const SUPABASE_URL = ENV.SUPABASE_URL || "";
-  const SUPABASE_KEY = ENV.SUPABASE_ANON_KEY || "";
+  // 硬编码兜底:即使 config.js 没加载也能初始化
+  const SUPABASE_URL = ENV.SUPABASE_URL || "https://rjzokjtcbnwenarzqaoe.supabase.co";
+  const SUPABASE_KEY = ENV.SUPABASE_ANON_KEY || "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InJqem9ranRjYm53ZW5hcnpxYW9lIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzg0MDk4OTAsImV4cCI6MjA5Mzk4NTg5MH0.2jyricE4-bXs1WWtUqXIIpGODwNyduVykFAZ80iQyd8";
 
   // 凭证可见性诊断 - 排查"密钥被覆盖/为空"
   console.log("[Auth] window.env =", window.env);

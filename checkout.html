@@ -309,10 +309,13 @@
    *  Supabase init + Auth guard
    * ============================================================ */
   const ENV=window.env||{};
+  // 硬编码兜底:即使 config.js 没加载也能初始化
+  const SUPABASE_URL = ENV.SUPABASE_URL || "https://rjzokjtcbnwenarzqaoe.supabase.co";
+  const SUPABASE_KEY = ENV.SUPABASE_ANON_KEY || "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InJqem9ranRjYm53ZW5hcnpxYW9lIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzg0MDk4OTAsImV4cCI6MjA5Mzk4NTg5MH0.2jyricE4-bXs1WWtUqXIIpGODwNyduVykFAZ80iQyd8";
   let sb=null;
   try{
-    if((ENV.SUPABASE_URL||"").startsWith("http") && (ENV.SUPABASE_ANON_KEY||"").length>20){
-      sb=window.supabase.createClient(ENV.SUPABASE_URL,ENV.SUPABASE_ANON_KEY,{
+    if(SUPABASE_URL.startsWith("http") && SUPABASE_KEY.length>20){
+      sb=window.supabase.createClient(SUPABASE_URL,SUPABASE_KEY,{
         auth:{persistSession:true,autoRefreshToken:true,detectSessionInUrl:true}
       });
     }

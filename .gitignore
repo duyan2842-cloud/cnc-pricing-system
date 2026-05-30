@@ -1,5 +1,4 @@
-# ---------- 包含密钥的本地配置 ----------
-config.js
+# ---------- 本地配置(已改为硬编码,config.js 不再 ignore) ----------
 .env
 .env.local
 .env.*.local
