@@ -10,6 +10,6 @@
  *  Row Level Security (RLS) 在数据库层强制执行。
  * ============================================================ */
 window.env = {
-  SUPABASE_URL:      "https://rjzokjtcbnwenarzqaoe.supabase.co",
-  SUPABASE_ANON_KEY: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InJqem9ranRjYm53ZW5hcnpxYW9lIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzg0MDk4OTAsImV4cCI6MjA5Mzk4NTg5MH0.2jyricE4-bXs1WWtUqXIIpGODwNyduVykFAZ80iQyd8",
+  SUPABASE_URL:      "https://ugazxxvphxxroccihbuv.supabase.co",
+  SUPABASE_ANON_KEY: "sb_publishable_k5BGQgGNabjE30AEFZPzrQ_qYU_DW8k",
 };
